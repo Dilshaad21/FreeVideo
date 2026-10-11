@@ -3,7 +3,7 @@ import { app } from '../../scripts/app.js';
 import { api } from '../../scripts/api.js';
 import { openSetup } from './setup.js';
 import { wordmark } from './wordmark.js';
-import { createGenerationProgress, referenceTrimText, thermalText } from './generation_progress.js';
+import { createGenerationProgress, referenceTrimText, thermalText, encoderFileText, encoderFilePath } from './generation_progress.js';
 import { viewSwitch, viewChanged } from './view_navigation.js';
 import { createUpdateNotice, createVersionInfo, productVersion } from './updates.js';
 import { createPortNotice } from './port_notice.js';
@@ -500,18 +500,27 @@ export function openStudio(node) {
         const saved = result;
         regenerate.disabled = true;
         try { await node.freevideoRegenerateResult(saved); regenerate.textContent = t('Queued', '已加入队列'); await syncQueue(); }
-        catch (error) { regenerate.disabled = false; status.dataset.error = 'true'; status.textContent = error.message; }
+        catch (error) { regenerate.disabled = false; resultActionFailed(error); }
     }, 'fv-quiet');
     reuseRow.append(reuseNotice, regenerate);
+    // The card's own diagnosis, so a known cause (e.g. out of GPU memory) keeps its advice.
+    // createErrorReport caches by error, so the card shown next uses the same report.
+    function extensionCause(error) { return !!createErrorReport(error, {stage: 'queue', node, graph: app.graph}).browser_extension; }
+    // A browser extension gets the shared card; other failures stay in the status line.
+    function resultActionFailed(error) {
+        if (extensionCause(error)) { showQueueError(error); return; }
+        status.dataset.error = 'true'; status.textContent = error.message;
+    }
     const trimNote = el('div', '', 'fv-note fv-trim-note'); trimNote.hidden = true; trimNote.setAttribute('role', 'status');
     // Run second pass is the preview's primary action in the result bar.
     const secondPass = saved => async () => {
         try { await node.freevideoUpscaleResult(saved); await syncQueue(); }
-        catch (error) { status.dataset.error = 'true'; status.textContent = error.message; throw error; }
+        catch (error) { resultActionFailed(error); throw error; }
     };
     const memoryNote = el('div', t('This video used the low-memory mode for this GPU, so it took longer than usual. A lower resolution or a shorter video runs faster.', '这段视频使用了省显存方式，所以比平时慢。降低分辨率或缩短时长会更快。'), 'fv-note'); memoryNote.hidden = true;
     const thermalNote = el('div', '', 'fv-note'); thermalNote.hidden = true;
-    output.append(status, reuseRow, trimNote, memoryNote, thermalNote, links, stats, budget, progress.stall, progress.report, prewarm);
+    const encoderNote = el('div', '', 'fv-note'); encoderNote.hidden = true;
+    output.append(status, reuseRow, trimNote, memoryNote, thermalNote, encoderNote, links, stats, budget, progress.stall, progress.report, prewarm);
     const failure = createErrorPanel(t); output.append(failure.element);
     // With the picture, the result's actions and numbers form one block, centred below the header.
     output.append(el('div', null, 'fv-preview-end'));
@@ -540,6 +549,9 @@ export function openStudio(node) {
         trimNote.textContent = trims.map(row => referenceTrimText(row, t)).join('\n'); trimNote.hidden = !trims.length;
         memoryNote.hidden = !r.low_memory || !!r.result_cache_hit;
         thermalNote.textContent = r.thermal ? thermalText(r.thermal, t) : ''; thermalNote.hidden = !r.thermal || !!r.result_cache_hit;
+        encoderNote.textContent = r.encoder_file ? encoderFileText(r.encoder_file, t) : ''; encoderNote.hidden = !r.encoder_file;
+        const encoderPath = encoderFilePath(r.encoder_file);
+        if (encoderPath) encoderNote.append(el('pre', encoderPath, 'fv-encoder-path'));
         regenerate.disabled = false; regenerate.textContent = t('Regenerate', '重新生成');
         const unified = r.memory_model === 'unified';
         metricLabels[2].textContent = unified ? t('Unified memory', '统一内存总量') : t('VRAM peak', '显存峰值');
@@ -640,7 +652,9 @@ export function openStudio(node) {
         if (['loop_stopped', 'queue_unavailable'].includes(error?.message)
             && node.freevideoFailureReport && node.freevideoFailureReport.stage !== 'queue') return;
         status.textContent = error?.schema === 'freevideo.error-report'
-            ? t('Submission failed. See the details below.', '提交失败，具体原因见下方。') : queueError(error);
+            ? t('Submission failed. See the details below.', '提交失败，具体原因见下方。')
+            : extensionCause(error) ? t('A browser extension is interfering with FreeVideo. See details below.', '浏览器扩展干扰了 FreeVideo，详见下方。')
+            : queueError(error);
         const identity = error?.schema === 'freevideo.error-report' ? error : error?.message || error;
         if (lastQueueError === identity) return;
         lastQueueError = identity;

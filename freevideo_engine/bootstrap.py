@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import threading
 import urllib.request
@@ -122,23 +123,49 @@ def setup_memory_failure(pressure):
     return detail + ' Downloaded files are retained.'
 
 
-def reinstall_download_bytes(dependencies, system):
-    """Bytes setup downloads again to replace changed PyTorch files: the pinned
+def reinstall_download_bytes(dependencies, system, *, root=None, frontend_python=None, disk_mode='normal'):
+    """Bytes setup downloads again to replace missing or changed files: the pinned
     Windows wheel (torch_download), elsewhere the package's installed size, an
-    upper bound for its wheel. Marks each environment's damaged packages."""
-    if system == 'Darwin':
-        return 0
+    upper bound for its wheel. Marks each engine environment's damaged packages."""
     from .environments import ENVIRONMENTS
-    from .runtime_libraries import damaged, installed_bytes
+    from .runtime_libraries import damaged, incomplete, installed_bytes
     from .torch_download import select
     total = 0
-    for name, row in dependencies.items():
+    seen = set()
+    environments = [] if system == 'Darwin' else [(name, row, False) for name, row in dependencies.items()]
+    if frontend_python:
+        # comfy_host matches the engine Python's packages after engine repair.
+        name = 'unified' if 'unified' in dependencies else 'engine'
+        environments.append((name, dict(python=str(frontend_python), exists=Path(frontend_python).is_file()), True))
+    for name, row, frontend in environments:
         if not row.get('exists'):
             continue
         row['damaged'] = broken = damaged(row['python'])
+        if frontend:
+            broken = sorted(set(broken + incomplete(row['python'])))
         pins = ENVIRONMENTS.get(name, {})
-        wheels = {w['package']: w['bytes'] for w in (select(pins['torch'], pins['cuda']) or [])} if system == 'Windows' and pins else {}
-        total += sum(wheels.get(package) or installed_bytes(row['python'], package) for package in broken)
+        wheels = {w['package']: w for w in (select(pins['torch'], pins['cuda']) or [])} if system == 'Windows' and pins else {}
+        for package in broken:
+            wheel = wheels.get(package)
+            if wheel is None:
+                total += installed_bytes(row['python'], package)
+                continue
+            if frontend and disk_mode == 'extreme':
+                # Engine setup clears these wheels before the launcher repairs ComfyUI.
+                total += wheel['bytes']
+                continue
+            key = (wheel['package'], wheel['version'])
+            if key in seen:
+                continue
+            seen.add(key)
+            if root is not None:
+                cached = Path(root) / 'downloads' / 'torch-wheels' / wheel['filename']
+                try:
+                    if cached.is_file() and cached.stat().st_size == wheel['bytes'] and digest(cached) == wheel['sha256']:
+                        continue
+                except OSError:
+                    pass
+            total += wheel['bytes']
     return total
 
 
@@ -392,9 +419,9 @@ def plan(args, *, local_progress=None):
             errors.append('Native Windows uses the unified environment. Rerun with --environment unified.')
             layout = 'unified'
         if windows_target and getattr(args, 'rebuild_sage', False):
-            errors.append('Windows uses the pinned, verified Sage2 wheel; --rebuild-sage is a Linux source-build option.')
+            errors.append('Windows uses the Sage2 wheel FreeVideo tests; --rebuild-sage is a Linux source-build option.')
         if int(snapshot['selected_gpu']['driver_version'].split('.')[0]) < 580:
-            errors.append('NVIDIA driver 580 or newer is required by the pinned CUDA 13 encoder; update the driver first.')
+            errors.append('NVIDIA driver 580 or newer is required by the CUDA 13 encoder FreeVideo tests; update the driver first.')
         compatibility = hardware.cuda_compatibility()
         if compatibility['error']:
             errors.append(compatibility['error'])
@@ -506,9 +533,16 @@ def plan(args, *, local_progress=None):
     groups = {}
     present = 0
     model_entries = []
+    from . import model_repair
+    mismatches = model_repair.read(root)
+    replace_models = []
+    reserved = set()
     for row in files:
         path = model_target(row, model_dir, encoder_dir, prepared_dir)
-        size_matches = path.is_file() and path.stat().st_size == row['bytes']
+        replacement = model_repair.replacement(path, row, mismatches, reserved)
+        if replacement:
+            replace_models.append(replacement)
+        size_matches = not replacement and path.is_file() and path.stat().st_size == row['bytes']
         present += row['bytes'] if size_matches else 0
         device = existing_parent(path.parent)
         entry = groups.setdefault(str(device), {'path': str(device), 'needed_bytes': 0,
@@ -525,7 +559,6 @@ def plan(args, *, local_progress=None):
     # GiB; allow 52 GiB including the largest group in progress. Never credit
     # future source deletion toward the space needed to complete conversion.
     dependencies = dependency_status(root, layout, system)
-    package_download_bytes = reinstall_download_bytes(dependencies, system)
     environments_ready = all(r['exists'] and not r['missing'] and not r['mismatched'] for r in dependencies.values())
     python_version = None if mac_target else bootstrap_versions(
         json.loads((PACKAGE / 'bootstrap_versions.json').read_text(encoding='utf-8')), system)['python']
@@ -546,6 +579,11 @@ def plan(args, *, local_progress=None):
         frontend_gib=frontend_allowance_gib(root, frontend['root'], mac_target) if frontend else disk_space.frontend_gib(mac_target))
     extra = disk_plan['environment_cache_safety_gib']
     errors.extend(disk_plan['errors'])
+    # A repair also reinstalls what is damaged in the ComfyUI environment the launcher made.
+    frontend_python = getattr(args, 'frontend_repair_python', None)
+    package_download_bytes = reinstall_download_bytes(dependencies, system, root=root,
+        frontend_python=str(frontend_python.expanduser().absolute()) if frontend_python else None,
+        disk_mode=disk_plan['mode'])
     if mac_target:
         errors.extend(disk_space.problem_messages([root, model_dir, encoder_dir] + ([frontend['root']] if frontend else [])))
     if reuse_cache and not cache_compatible(reuse_cache, **cache_format):
@@ -586,6 +624,7 @@ def plan(args, *, local_progress=None):
             'model_downloader': getattr(args, 'model_downloader', 'auto'),
             'allow_model_restart': getattr(args, 'allow_model_restart', False),
             'local_models': local_reuse,
+            'replace_models': sorted(replace_models, key=lambda row: row['path']),
             'model_groups': model_inventory(model_entries),
             'environment_layout': layout,
             'environment_count': len(environment_names(layout)),
@@ -620,10 +659,10 @@ def plan(args, *, local_progress=None):
             'test_artifacts_estimate_gib': '5–8 GiB for the standard five-case suite; all outputs retained',
             'first_generation_note': 'Portable AdaLN tables follow model weights and the exact schedule, across GPUs and Torch/CUDA versions. New schedules or modulation-changing LoRAs require preparation. Existing environments stay on disk when switching.',
             'estimates_are_not_capacity_guarantees': True, 'errors': errors,
-            'steps': ['Install isolated uv/Python and ' + ('one shared CUDA environment' if layout == 'unified' else 'two pinned CUDA environments'),
-                      'Clone pinned VDN, patched Diffusers and the native H3 text-encoder library',
+            'steps': ['Install isolated uv/Python and ' + ('one shared CUDA environment' if layout == 'unified' else 'two CUDA environments'),
+                      'Clone the VDN, patched Diffusers and native H3 text-encoder library versions FreeVideo tests',
                       'Install verified Windows Triton / Sage2 wheels' if windows_target else 'Install a local CUDA compiler and build Sage2 for the detected GPU only',
-                      'Download and verify pinned base, eight-step checkpoint and encoder weights',
+                      'Download and verify the base, eight-step checkpoint and encoder weights FreeVideo tests',
                       'Prepare or verify the architecture-compatible FP8 cache',
                       'Execute small attention/linear kernel probes and save machine configuration'],
             'licenses': ['https://huggingface.co/OpenVDN/vdn-minimax-h3/blob/751739ee5b9e3ac802dca5d5111075fdaeb47885/LICENSE',
@@ -634,6 +673,8 @@ def plan(args, *, local_progress=None):
         describe_plan(value)
     else:
         value['cuda_compatibility'] = compatibility
+    value['replace_models_text'] = {language: model_repair.review_lines(value['replace_models'], zh=language == 'zh')
+                                    for language in ('en', 'zh')}
     return value
 
 
@@ -660,6 +701,9 @@ def display(value, ui=None, *, verbose=False):
                  if value['model_download_bytes'] else 'No new model files expected · verify existing files'))
     if value.get('package_download_bytes'):
         rows.append(('Package download', '~%.1f GiB to replace changed PyTorch files' % (value['package_download_bytes']/GiB)))
+    from .model_repair import review_lines
+    for line in review_lines(value.get('replace_models', [])):
+        rows.extend((('Model repair', line['text']), ('Model repair path', line['path'])))
     if value.get('disk_mode') == 'extreme':
         rows.append(('Disk mode', 'Automatic space saver · sequential downloads · temporary package cache removed before models'))
     if value.get('local_models'):
@@ -735,6 +779,9 @@ def display_details(value, ui=None):
         rows.append(('Installation RAM budget', '%.2f GiB · system growth reserve %.2f GiB' %
                      (resources['ram_budget_bytes']/GiB, resources['ram_system_reserve_bytes']/GiB)))
     rows.append(('Install root', value['root']))
+    from .model_repair import review_lines
+    for line in review_lines(value.get('replace_models', [])):
+        rows.extend((('Model repair', line['text']), ('Model repair path', line['path'])))
     rows.append(('Environment', value['environment_layout'] + ' · text encoder exits before video models load'))
     rows.append(('Kernel installation', value.get('kernel_install', 'Local Sage2 build')))
     rows.append(('Git', value.get('git_install', 'Use detected Git')))
@@ -764,7 +811,7 @@ def display_details(value, ui=None):
     rows.append(('Source weights', value.get('storage_cleanup', 'Retain source weights')))
     if value['reuse_cache']:
         rows.append(('Prepared cache', 'Reuse FP8 · skip original BF16/LoRA downloads and scans'))
-    rows.append(('Verification', value['verification'] + ' · auto reuses unchanged pinned receipts; full rereads tensors'))
+    rows.append(('Verification', value['verification'] + ' · auto reuses unchanged model receipts; full rereads tensors'))
     if value['build']:
         rows.append(('Sage2 build', 'Up to %d compiler jobs · ~%.1f GiB RAM estimate · reusable ABI/GPU wheel cache' %
                     (value['build']['jobs'], value['build']['estimated_peak_bytes']/GiB)))
@@ -788,8 +835,13 @@ def confirmed(args, value, ask=input, ui=None):
         if not args.yes or not args.accept_model_license:
             raise ValueError('--approved-plan requires explicit plan/license acceptance.')
         reviewed = json.loads(Path(reviewed_path).read_text(encoding='utf-8'))
+        from . import model_repair
+        model_repair.reuse_names(value.get('replace_models', []), reviewed.get('replace_models', []))
+        value['replace_models_text'] = {language: model_repair.review_lines(value.get('replace_models', []), zh=language == 'zh')
+                                        for language in ('en', 'zh')}
         keys = ('root', 'engine_version', 'environment_layout', 'model_dir', 'encoder_dir', 'vram_gib', 'ram_gib', 'reuse_cache', 'storage', 'storage_cleanup', 'model_downloader', 'prepared_model', 'prepared_format', 'model_source', 'disk_mode', 'frontend', 'sampling_caches')
         changed = any(reviewed.get(key) != value.get(key) for key in keys)
+        changed |= reviewed.get('replace_models', []) != value.get('replace_models', [])
         changed |= reviewed.get('device_backend') != value.get('device_backend')
         if value.get('device_backend') == 'mps':
             changed |= reviewed.get('inventory', {}).get('selected_device') != value['inventory']['selected_device']
@@ -853,6 +905,43 @@ def unpack(archive, destination):
                 if not target.resolve().is_relative_to(destination.resolve()):
                     raise ValueError('Unsafe archive link: ' + member.name)
         tar.extractall(destination)
+
+
+def unpack_folder(archive, destination, name):
+    """Unpack the archive's top-level folder `name` to destination/name, replacing what is there.
+
+    A repair can find destination/name, or a file in it, replaced by a link to
+    elsewhere. Checked in place, the archive's members would resolve through
+    that link and be refused, and extracting would write through it. Unpack into
+    a new folder instead, then replace only the link or folder at destination/name,
+    never what a link points to.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix='.unpack-', dir=destination))
+    present = lambda path: path.is_symlink() or path.exists()
+    keep = False
+    try:
+        unpack(archive, staging)
+        unpacked = staging / name
+        if unpacked.is_symlink() or not unpacked.is_dir():
+            raise ValueError('Archive has no folder ' + name)
+        target, previous = destination / name, staging / (name + '.previous')
+        try:
+            # Renaming a link moves the link itself, never what it points to.
+            if present(target):
+                os.replace(target, previous)
+            os.replace(unpacked, target)
+        except BaseException:
+            # A failed or interrupted repair puts the previous uv back.
+            if present(previous) and not present(target):
+                try:
+                    os.replace(previous, target)
+                except OSError:
+                    keep = True  # Rather leave it in the staging folder than delete it.
+            raise
+    finally:
+        if not keep:
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def setup_task(label):
@@ -1667,7 +1756,7 @@ class Installer:
                 except OSError:
                     shutil.copyfile(previous, archive)
             self.fetch(uv_spec['url'], archive, uv_spec['sha256'])
-            unpack(archive, self.root / 'tools')
+            unpack_folder(archive, self.root / 'tools', 'uv-x86_64-unknown-linux-gnu')
             uv = self.root / 'tools' / 'uv-x86_64-unknown-linux-gnu' / 'uv'
         return uv
 
@@ -1841,20 +1930,21 @@ def main(argv=None):
                         help='With --prepared-format: download and verify that model beside the installed one, which stays '
                              'in use. No other setup step runs and machine.json is unchanged')
     parser.add_argument('--model-source', choices=('prepared', 'source'), default='prepared',
-                        help='Default: download a pinned slim model matching the GPU format. source: explicitly download original weights and convert locally')
+                        help='Default: download a slim model FreeVideo tests matching the GPU format. source: explicitly download original weights and convert locally')
     parser.add_argument('--encoder-models', type=Path, help='Directory containing text_encoders/')
-    parser.add_argument('--reuse-models', type=Path, help='Scan an existing model library, verify pinned content and import matching files; only missing models are downloaded')
+    parser.add_argument('--reuse-models', type=Path, help='Scan an existing model library, verify content against the version FreeVideo tests and import matching files; only missing models are downloaded')
     parser.add_argument('--reuse-models-manifest', type=Path, help='Versioned JSON containing model library roots, including ComfyUI extra model paths')
     parser.add_argument('--copy-existing-models', action='store_true', help='Copy verified local models instead of using same-disk hardlinks; source files are kept')
     parser.add_argument('--allow-model-restart', action='store_true', help='Permit a fresh download when an incomplete model cannot resume; retains old data and may use extra download/disk space')
     cache_options = parser.add_mutually_exclusive_group()
     cache_options.add_argument('--cache', type=Path, help='Verify and reuse an existing FP8 cache')
-    cache_options.add_argument('--rebuild-cache', action='store_true', help='Recreate FP8 from pinned source weights, downloading missing sources; preserve failed caches')
+    cache_options.add_argument('--rebuild-cache', action='store_true', help='Recreate FP8 from the source weights FreeVideo tests, downloading missing sources; preserve failed caches')
     parser.add_argument('--storage', choices=('compact', 'retain'), help='Default compact: stream FP8 and remove installer-owned conversion sources after verification; retain keeps sources for re-quantization')
     parser.add_argument('--frontend-root', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--frontend-separate', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--frontend-download', action='store_true', help=argparse.SUPPRESS)
-    parser.add_argument('--verify', choices=('auto', 'full'), default='auto', help='auto reuses unchanged pinned receipts; full rereads every required tensor')
+    parser.add_argument('--frontend-repair-python', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--verify', choices=('auto', 'full'), default='auto', help='auto reuses unchanged model receipts; full rereads every required tensor')
     parser.add_argument('--wheel-cache', type=Path, help='Reusable local Sage2 wheel cache, keyed by architecture and ABI')
     parser.add_argument('--rebuild-sage', action='store_true', help='Measure a fresh source build, retaining previous build artifacts')
     parser.add_argument('--vram-gib', type=float, help='Save an explicit nominal VRAM cap; default uses detected resources')

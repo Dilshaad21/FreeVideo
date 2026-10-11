@@ -169,7 +169,9 @@ def summary_report(report):
         checkpoint = diagnostic.mapping(encoding.get('checkpoint'))
         if checkpoint.get('state') in ('read_only_mmap', 'native_mmap', 'resident_reuse'):
             result['encoder_resources']['checkpoint'] = dict(
-                diagnostic.numbers(checkpoint, ('bytes',)), state=checkpoint['state'])
+                diagnostic.numbers(checkpoint, ('bytes', 'expected_bytes')), state=checkpoint['state'])
+            if type(checkpoint.get('tested_size')) is bool:
+                result['encoder_resources']['checkpoint']['tested_size'] = checkpoint['tested_size']
         result['encoder_resources']['load_stages'] = []
         result['encoder_resources']['gpu'] = dict(result['encoder_resources'].get('gpu', {}),
             **diagnostic.gpu_snapshot(encoding.get('gpu')))

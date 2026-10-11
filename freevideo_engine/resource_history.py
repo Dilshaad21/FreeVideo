@@ -452,3 +452,19 @@ class ResourceHistory:
         with self._transaction() as db:
             rows = [self._row(row) for row in db.execute(query, arguments)]
         return list(reversed(rows)) if limit is not None else rows
+
+    def requests(self, *, limit):
+        """The newest successful generations, oldest first, measured or not.
+
+        A preview and its upscale succeed without a resource observation, so
+        observations() leaves them out; their geometry and placement evidence
+        still say what was asked for.
+        """
+        if type(limit) is not int or limit <= 0:
+            raise ValueError('Request limit must be a positive integer')
+        query = ("SELECT id,state,started,settled,purpose,phase,geometry_json,details_json,observation_json "
+                 "FROM attempts WHERE state='success' AND purpose='generation' "
+                 "ORDER BY started DESC,id DESC LIMIT ?")
+        with self._transaction() as db:
+            rows = [self._row(row) for row in db.execute(query, (limit,))]
+        return list(reversed(rows))

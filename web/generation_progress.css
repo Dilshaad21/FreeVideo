@@ -35,6 +35,7 @@
 .fv-studio .fv-stage[data-short=true] .fv-generation-progress.fv-generation-compact{padding:8px 16px}
 /* The small bar keeps its 160 px in the narrower box. */
 .fv-studio .fv-stage .fv-generation-compact .fv-generation-mini{max-width:100%}
+.fv-encoder-path{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 ui-monospace,monospace;color:var(--fv-muted);user-select:text}
 .fv-report-download{display:block;align-self:center;width:fit-content;max-width:100%;margin:8px auto 0;font-size:12px}
 .fv-report-download[hidden],.fv-report-download[data-covered]{display:none!important}
 @keyframes fv-generation-sweep{0%{left:-20%;width:20%}50%{left:33%;width:34%}100%{left:100%;width:20%}}

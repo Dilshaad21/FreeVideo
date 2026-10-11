@@ -35,6 +35,8 @@ def cache_bytes(path):
         raise error
     for directory, folders, files in os.walk(path, followlinks=False, onerror=unreadable):
         for name in [*folders, *files]:
+            if '.replaced-' in name:
+                raise ValueError('Cache contains a retained original; retained.')
             item = Path(directory) / name
             info = item.lstat()
             if stat.S_ISLNK(info.st_mode):

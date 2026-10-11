@@ -1,4 +1,5 @@
 """One small, torch-free report per request, including failed requests."""
+from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import json
 import math
@@ -20,6 +21,17 @@ def number(value):
 
 def mapping(value):
     return value if isinstance(value, dict) else {}
+
+
+def encoder_sizes(actual_bytes, expected_bytes):
+    """GiB with enough precision to distinguish unequal byte counts."""
+    values = (Decimal(actual_bytes) / 2**30, Decimal(expected_bytes) / 2**30)
+    for places in range(1, 11):
+        unit = Decimal(10) ** -places
+        sizes = tuple(f'{value.quantize(unit, rounding=ROUND_HALF_UP):f}' for value in values)
+        if actual_bytes == expected_bytes or sizes[0] != sizes[1]:
+            return sizes
+    return sizes
 
 
 def code_identity():
@@ -89,6 +101,15 @@ def summarize(report, engine, encoding):
     steps = steps if isinstance(steps, list) and all(number(x) is not None for x in steps) else []
     kernels = kernel_receipt(engine)
     hints = []
+    checkpoint = mapping(encoding.get('checkpoint'))
+    actual, expected = number(checkpoint.get('bytes')), number(checkpoint.get('expected_bytes'))
+    if checkpoint.get('tested_size') is False and actual is not None and expected is not None:
+        actual, expected = encoder_sizes(actual, expected)
+        hints.append(dict(kind='configuration',
+            message='The text encoder file used is %s GiB, not the %s GiB file with the same name that FreeVideo installs and tests. '
+                    'Results and speed are not guaranteed to match the tested version.' % (actual, expected),
+            message_zh='这次使用的文本编码器文件为 %s GiB，不是 FreeVideo 安装并测试的同名文件（%s GiB）。'
+                       '生成结果和速度都不保证与测试过的版本一致。' % (actual, expected)))
     if (mapping(engine.get('config')).get('resident_blocks') == 50
             and number(offload.get('transfers')) == 0 and number(offload.get('h2d_bytes')) == 0):
         hints.append(dict(kind='measured', message='All 50 transformer blocks are configured on GPU and recorded weight transfers are zero. '

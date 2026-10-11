@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import time
 
-from . import portable, processes
+from . import component_licenses, portable, processes
 from .comfy_launcher import Launcher
 from .comfy_launcher_runtime import Controller, local_url, matches_server, server_info
 from .monitoring import save
@@ -14,14 +14,19 @@ UNREADABLE = 'FreeVideo cannot read its program files'
 
 
 class PortableController(Controller):
-    def __init__(self, root):
+    def __init__(self, root, bundled=None):
         self.root = Path(root).resolve()
         self.bundle = portable.manifest(self.root)
         super().__init__(portable.inside(self.root, self.bundle['source']))
+        # The launcher's own engine code, which an installation it assembled can move to.
+        self.bundled = Path(bundled) if bundled else None
+        self.update_values = None
         self.child = None
         self.initialization_log = None
         self.comfy_controller = None
         self.fixed_environment = True
+        # What the first start asks the user to accept, read once from the file list.
+        self.licenses = component_licenses.bundle(self.root, self.bundle)
 
     def restore(self, values):
         # Restoring the launcher is read-only. A bundled deployment is not yet
@@ -31,9 +36,71 @@ class PortableController(Controller):
             engine=str(self.root/'engine'), source=str(self.source),
             python=str(portable.inside(self.root, self.bundle['python'])),
             url=local_url(url or 'http://127.0.0.1:8188'), ready=False, separate=False)
-        self.state = dict(status='bundled', selection=dict(self.selection))
+        self.state = dict(status='bundled', selection=dict(self.selection),
+                          engine_update_available=self.engine_outdated())
         self.restore_terminal(self.selection['engine'])
         return True
+
+    def engine_outdated(self):
+        """This launcher carries other engine code than the installation it assembled runs.
+
+        A full bundle starts the code inside it, and an environment that no
+        longer fits this launcher's engine keeps the code it has. Whether the
+        launcher's code is the newer one is the session's comparison, as for
+        any installation."""
+        if self.bundled is None or (self.root/'start_portable.py').is_file():
+            return False
+        from .desktop_runtime import matching_source
+        from .offline_packages import runtime_fits
+        try:
+            fits = runtime_fits(json.loads((self.root/'runtime.json').read_text(encoding='utf-8')))
+        except (OSError, ValueError, AttributeError):
+            return False
+        return fits and not matching_source(self.bundled, self.source)
+
+    def owns_server(self):
+        # The ComfyUI a launch started belongs to that connection's controller.
+        controller = self.comfy_controller
+        return controller is not None and controller.owns_server()
+
+    def _inspect(self, values):
+        """The session's engine update asks first; nothing is downloaded or installed."""
+        self.restore(values)
+        if not self.state['engine_update_available']:
+            raise ValueError('This offline installation already runs the engine this launcher carries')
+        self.update_values = dict(values)
+        self.state = dict(self.state, status='review', action='inspect', host=dict(ready=True),
+                          selection=dict(self.selection, ready=True))
+
+    def _install(self, accepted):
+        """Start the launcher's engine code with this installation's environment and models.
+
+        A start that fails puts the previous code back, so the next start works as before."""
+        if not accepted or self.update_values is None:
+            raise ValueError('Review the engine update first')
+        values, self.update_values = self.update_values, None
+        if self.comfy_controller is not None:
+            # Our idle ComfyUI runs the previous code; a running job is never stopped.
+            self.comfy_controller._stop_server_for_setup(self.selection['url'])
+        previous = self.bundle
+        from .offline_packages import rebind
+        rebind(self.root, self.bundled)
+        try:
+            self.bundle = portable.manifest(self.root)
+            self.source = portable.inside(self.root, self.bundle['source'])
+            self._launch(values)
+        except BaseException:
+            try:
+                # Only this update's binding goes back: another launcher may have changed it since.
+                if portable.manifest(self.root).get('source') == self.bundle['source']:
+                    save(self.root/'portable.json', previous)
+                self.bundle = portable.manifest(self.root)
+                self.source = portable.inside(self.root, self.bundle['source'])
+                # The selection and the offered update follow the code now bound, so Update now stays.
+                self.restore(values)
+            except (OSError, ValueError):
+                pass  # The start's own failure is the one to report.
+            raise
 
     def terminal_sources(self):
         sources = super().terminal_sources()
@@ -242,6 +309,8 @@ def portable_session(root):
     os.environ.update(portable.environment(root, portable.manifest(root)))
     os.environ['FREEVIDEO_LAUNCHER_HOME'] = str(root/'engine/launcher')
     class PortableSession(Session):
+        bundled = True
+
         def __init__(self):
             controller = PortableController(root)
             self.consent_path = root/'engine/portable-consent.json'

@@ -264,6 +264,8 @@ class Setup:
                 arguments.append('--frontend-separate')
             if frontend.get('download'):
                 arguments.append('--frontend-download')
+            if frontend.get('repair_python'):
+                arguments += ['--frontend-repair-python', frontend['repair_python']]
         if isinstance(value.get('sampling_caches'), bool):
             arguments.append('--sampling-caches' if value['sampling_caches'] else '--no-sampling-caches')
         if value.get('prepared_format') in ('int8', 'fp8'):
@@ -363,7 +365,9 @@ class Setup:
         return self.status()
 
     def _stop_idle_prewarm(self):
+        from .background_compile import COMPILE
         from .encoder_prewarm import IDLE
+        COMPILE.stop()
         IDLE.stop()
 
     def _close_resident_worker(self):

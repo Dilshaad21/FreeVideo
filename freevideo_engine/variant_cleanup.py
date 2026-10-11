@@ -66,6 +66,8 @@ def inside(base, path):
 
 
 def unshared_file(path):
+    if '.replaced-' in path.name:
+        return None
     try:
         info = path.lstat()
     except OSError:

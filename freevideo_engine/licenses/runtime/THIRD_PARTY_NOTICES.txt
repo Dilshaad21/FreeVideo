@@ -1,0 +1,177 @@
+﻿Third-party components in the FreeVideo runtime
+
+FreeVideo's own Apache-2.0 license does not cover the components below. The NVIDIA and Intel
+components are under their vendors' terms: they may not be reverse engineered and may not be
+redistributed on their own, apart from FreeVideo. As a recipient of the Intel components, you are
+bound by the limitations of liability in Section 7 of the Intel license
+(Intel-EULA-Developer-Tools.txt, beside this file). The AMD and TinyCC components are open source
+under the licenses named in their sections.
+
+The files listed are those of the FreeVideo Windows runtime, relative to the FreeVideo-Windows
+folder of FreeVideo-运行环境.zip and FreeVideo-Windows-运行环境与ComfyUI-无模型.zip. The full license texts
+named below are beside this file.
+
+NVIDIA CUDA libraries
+  License: NVIDIA CUDA Toolkit End User License Agreement; full text in NVIDIA-CUDA-EULA.txt
+  https://docs.nvidia.com/cuda/eula/index.html
+  Files:
+    python/Lib/site-packages/torch/lib/cublas64_13.dll
+    python/Lib/site-packages/torch/lib/cublasLt64_13.dll
+    python/Lib/site-packages/torch/lib/cudart64_13.dll
+    python/Lib/site-packages/torch/lib/cufft64_12.dll
+    python/Lib/site-packages/torch/lib/cufftw64_12.dll
+    python/Lib/site-packages/torch/lib/cupti64_2025.3.0.dll
+    python/Lib/site-packages/torch/lib/curand64_10.dll
+    python/Lib/site-packages/torch/lib/cusolver64_12.dll
+    python/Lib/site-packages/torch/lib/cusolverMg64_12.dll
+    python/Lib/site-packages/torch/lib/cusparse64_12.dll
+    python/Lib/site-packages/torch/lib/nvJitLink_130_0.dll
+    python/Lib/site-packages/torch/lib/nvToolsExt64_1.dll
+    python/Lib/site-packages/torch/lib/nvperf_host.dll
+    python/Lib/site-packages/torch/lib/nvrtc-builtins64_130.dll
+    python/Lib/site-packages/torch/lib/nvrtc64_130_0.alt.dll
+    python/Lib/site-packages/torch/lib/nvrtc64_130_0.dll
+
+NVIDIA cuDNN
+  License: NVIDIA cuDNN Software License Agreement; full text in NVIDIA-cuDNN-SLA.txt
+  https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html
+  Files:
+    python/Lib/site-packages/torch/lib/cudnn64_9.dll
+    python/Lib/site-packages/torch/lib/cudnn_adv64_9.dll
+    python/Lib/site-packages/torch/lib/cudnn_cnn64_9.dll
+    python/Lib/site-packages/torch/lib/cudnn_engines_precompiled64_9.dll
+    python/Lib/site-packages/torch/lib/cudnn_engines_runtime_compiled64_9.dll
+    python/Lib/site-packages/torch/lib/cudnn_graph64_9.dll
+    python/Lib/site-packages/torch/lib/cudnn_heuristic64_9.dll
+    python/Lib/site-packages/torch/lib/cudnn_ops64_9.dll
+
+NVIDIA CUDA tools in triton-windows
+  License: NVIDIA CUDA Toolkit End User License Agreement; full text in NVIDIA-CUDA-EULA.txt
+  https://docs.nvidia.com/cuda/eula/index.html
+  Files:
+    python/Lib/site-packages/triton/backends/nvidia/bin/ptxas.exe
+    python/Lib/site-packages/triton/backends/nvidia/include/cuda.h
+    python/Lib/site-packages/triton/backends/nvidia/lib/libdevice.10.bc
+    python/Lib/site-packages/triton/backends/nvidia/lib/x64/cuda.lib
+
+Intel OpenMP runtime
+  License: Intel End User License Agreement for Developer Tools (Version August 2024); full text in Intel-EULA-Developer-Tools.txt
+  https://www.intel.com/content/www/us/en/developer/articles/license/end-user-license-agreement.html
+  Files:
+    python/Lib/site-packages/torch/lib/libiomp5md.dll
+    python/Lib/site-packages/torch/lib/libiompstubs5md.dll
+
+AMD device libraries in triton-windows
+  License: University of Illinois/NCSA Open Source License; full text in ROCm-Device-Libs-NCSA.txt
+  https://github.com/ROCm/llvm-project/blob/amd-staging/amd/device-libs/LICENSE.TXT
+  Files:
+    python/Lib/site-packages/triton/backends/amd/lib/asanrtl.bc
+    python/Lib/site-packages/triton/backends/amd/lib/ockl.bc
+    python/Lib/site-packages/triton/backends/amd/lib/ocml.bc
+
+TinyCC in triton-windows
+  License: GNU Lesser General Public License v2.1; full text in TinyCC-LGPL-2.1.txt; source code: see SOURCES.txt
+  https://github.com/TinyCC/tinycc
+  Files:
+    python/Lib/site-packages/triton/runtime/tcc/include/_mingw.h
+    python/Lib/site-packages/triton/runtime/tcc/include/assert.h
+    python/Lib/site-packages/triton/runtime/tcc/include/conio.h
+    python/Lib/site-packages/triton/runtime/tcc/include/ctype.h
+    python/Lib/site-packages/triton/runtime/tcc/include/dir.h
+    python/Lib/site-packages/triton/runtime/tcc/include/direct.h
+    python/Lib/site-packages/triton/runtime/tcc/include/dirent.h
+    python/Lib/site-packages/triton/runtime/tcc/include/dos.h
+    python/Lib/site-packages/triton/runtime/tcc/include/errno.h
+    python/Lib/site-packages/triton/runtime/tcc/include/excpt.h
+    python/Lib/site-packages/triton/runtime/tcc/include/fcntl.h
+    python/Lib/site-packages/triton/runtime/tcc/include/fenv.h
+    python/Lib/site-packages/triton/runtime/tcc/include/float.h
+    python/Lib/site-packages/triton/runtime/tcc/include/inttypes.h
+    python/Lib/site-packages/triton/runtime/tcc/include/io.h
+    python/Lib/site-packages/triton/runtime/tcc/include/iso646.h
+    python/Lib/site-packages/triton/runtime/tcc/include/limits.h
+    python/Lib/site-packages/triton/runtime/tcc/include/locale.h
+    python/Lib/site-packages/triton/runtime/tcc/include/malloc.h
+    python/Lib/site-packages/triton/runtime/tcc/include/math.h
+    python/Lib/site-packages/triton/runtime/tcc/include/mem.h
+    python/Lib/site-packages/triton/runtime/tcc/include/memory.h
+    python/Lib/site-packages/triton/runtime/tcc/include/process.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/conio_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/crtdbg_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/io_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/mbstring_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/search_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/stdio_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/stdlib_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/stralign_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/string_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/sys/timeb_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/tchar_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/time_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sec_api/wchar_s.h
+    python/Lib/site-packages/triton/runtime/tcc/include/setjmp.h
+    python/Lib/site-packages/triton/runtime/tcc/include/share.h
+    python/Lib/site-packages/triton/runtime/tcc/include/signal.h
+    python/Lib/site-packages/triton/runtime/tcc/include/stdalign.h
+    python/Lib/site-packages/triton/runtime/tcc/include/stdarg.h
+    python/Lib/site-packages/triton/runtime/tcc/include/stdatomic.h
+    python/Lib/site-packages/triton/runtime/tcc/include/stdbool.h
+    python/Lib/site-packages/triton/runtime/tcc/include/stddef.h
+    python/Lib/site-packages/triton/runtime/tcc/include/stdint.h
+    python/Lib/site-packages/triton/runtime/tcc/include/stdio.h
+    python/Lib/site-packages/triton/runtime/tcc/include/stdlib.h
+    python/Lib/site-packages/triton/runtime/tcc/include/stdnoreturn.h
+    python/Lib/site-packages/triton/runtime/tcc/include/string.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sys/fcntl.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sys/file.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sys/locking.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sys/stat.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sys/time.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sys/timeb.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sys/types.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sys/unistd.h
+    python/Lib/site-packages/triton/runtime/tcc/include/sys/utime.h
+    python/Lib/site-packages/triton/runtime/tcc/include/tcc/tcc_libm.h
+    python/Lib/site-packages/triton/runtime/tcc/include/tccdefs.h
+    python/Lib/site-packages/triton/runtime/tcc/include/tcclib.h
+    python/Lib/site-packages/triton/runtime/tcc/include/tchar.h
+    python/Lib/site-packages/triton/runtime/tcc/include/tgmath.h
+    python/Lib/site-packages/triton/runtime/tcc/include/time.h
+    python/Lib/site-packages/triton/runtime/tcc/include/uchar.h
+    python/Lib/site-packages/triton/runtime/tcc/include/unistd.h
+    python/Lib/site-packages/triton/runtime/tcc/include/vadefs.h
+    python/Lib/site-packages/triton/runtime/tcc/include/values.h
+    python/Lib/site-packages/triton/runtime/tcc/include/varargs.h
+    python/Lib/site-packages/triton/runtime/tcc/include/wchar.h
+    python/Lib/site-packages/triton/runtime/tcc/include/wctype.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/basetsd.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/basetyps.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/guiddef.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/poppack.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/pshpack1.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/pshpack2.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/pshpack4.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/pshpack8.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/qos.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/shellapi.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/winbase.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/wincon.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/windef.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/windows.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/winerror.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/wingdi.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/winnls.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/winnt.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/winreg.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/winsock2.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/winuser.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/winver.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/ws2ipdef.h
+    python/Lib/site-packages/triton/runtime/tcc/include/winapi/ws2tcpip.h
+    python/Lib/site-packages/triton/runtime/tcc/lib/gdi32.def
+    python/Lib/site-packages/triton/runtime/tcc/lib/kernel32.def
+    python/Lib/site-packages/triton/runtime/tcc/lib/libtcc1.a
+    python/Lib/site-packages/triton/runtime/tcc/lib/msvcrt.def
+    python/Lib/site-packages/triton/runtime/tcc/lib/user32.def
+    python/Lib/site-packages/triton/runtime/tcc/libtcc.dll
+    python/Lib/site-packages/triton/runtime/tcc/tcc.exe

@@ -2,7 +2,7 @@ import { createErrorPanel, errorText } from './error_panel.js';
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { openStudio, loraPanel, loraWarning, promptGuide } from "./studio.js";
-import { createGenerationProgress, referenceTrimText, thermalText } from './generation_progress.js';
+import { createGenerationProgress, referenceTrimText, thermalText, encoderFileText, encoderFilePath } from './generation_progress.js';
 import { createProgressConnection } from './progress_connection.js';
 import { notifyCompatibility } from './compatibility.js';
 import { startUpdateChecks } from './updates.js';
@@ -351,12 +351,31 @@ function resultPanel(node) {
         if (panel.lastElementChild !== warning) panel.append(warning);
     };
     panel.append(el("div", text("Video, audio and timings appear here after generation.", "生成后在这里查看视频、音频和耗时。"), "fv-note"));
-    // The 218-character English notice is 8 characters shorter than before.
-    // Reserve at least 90px; a narrow node or larger font may wrap further.
-    const panelHeight = () => (hasLoRA() ? 240 : 140) + (node.freevideoFailure ? 280 : 0) + (node.freevideoProgress ? (progress.percentShown?.() === false ? 142 : 190) + 40 * progress.noticeCount() : 0)
-        + (progress.stallShown() ? Math.max(90, (progress.stall.scrollHeight || 0) + 18) : 0)
-        + (showingResult ? 40 * (node.freevideoLastResult?.reference_trims?.length || 0) : 0);
-    node.addDOMWidget("freevideo_result", "freevideo_result", panel, {serialize: false, getMinHeight: panelHeight, getMaxHeight: panelHeight});
+    const panelMargin = 10;
+    const panelHeight = () => {
+        // A hidden canvas (the creation panel is open) has no layout to measure; estimate 40 px per notice.
+        if (showingResult && !panel.getClientRects().length) {
+            const notes = [...panel.children].filter(child => child !== warning && !child.hidden && /\bfv-note\b/.test(child.className)).length;
+            return (hasLoRA() ? 240 : 140) + 40 * notes + (progress.stallShown() ? Math.max(90, (progress.stall.scrollHeight || 0) + 18) : 0);
+        }
+        if (showingResult) {
+            const style = getComputedStyle(panel);
+            // ComfyUI insets the DOM element by the widget margin on both sides.
+            let height = 2 * panelMargin + (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0)
+                + (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+            for (const child of panel.children) {
+                const style = getComputedStyle(child);
+                if (style.display === 'none') continue;
+                height += child.offsetHeight + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
+            }
+            return height;
+        }
+        // The 218-character English notice is 8 characters shorter than before.
+        // Reserve at least 90px; a narrow node or larger font may wrap further.
+        return (hasLoRA() ? 240 : 140) + (node.freevideoFailure ? 280 : 0) + (node.freevideoProgress ? (progress.percentShown?.() === false ? 142 : 190) + 40 * progress.noticeCount() : 0)
+            + (progress.stallShown() ? Math.max(90, (progress.stall.scrollHeight || 0) + 18) : 0);
+    };
+    node.addDOMWidget("freevideo_result", "freevideo_result", panel, {serialize: false, margin: panelMargin, getMinHeight: panelHeight, getMaxHeight: panelHeight});
     const connected = node.onConnectionsChange, configured = node.onConfigure;
     node.onConnectionsChange = function (...args) { const result = connected?.apply(this, args); warn(); queueMicrotask(syncPrompts); return result; };
     // Nodes made from now on carry the 8 + 3 default; a later choice of 8 + 2 is kept.
@@ -401,7 +420,7 @@ function resultPanel(node) {
         node.freevideoClearFailure();
         node.freevideoLastResult = value;
         window.dispatchEvent(new CustomEvent('freevideo-result', {detail: {node: node.id, value}}));
-        panel.replaceChildren(); const stats = el("div", undefined, "fv-stats");
+        panel.replaceChildren(); const resultNotes = [], stats = el("div", undefined, "fv-stats");
         stats.hidden = !!value.result_cache_hit;
         const number = (value, scale, unit) => Number.isFinite(value) && value >= 0 ? `${(value / scale).toFixed(1)} ${unit}` : "—";
         const unified = value.memory_model === 'unified';
@@ -424,7 +443,7 @@ function resultPanel(node) {
             upscale.onclick = async () => {
                 upscale.disabled = true;
                 try { await node.freevideoUpscaleResult(value); upscale.textContent = text('Queued', '已加入队列'); }
-                catch (error) { upscale.disabled = false; node.freevideoShowFailure({exception_message: error.message}); }
+                catch (error) { upscale.disabled = false; node.freevideoShowFailure(error); }
             };
             links.append(upscale);
         }
@@ -433,18 +452,26 @@ function resultPanel(node) {
             again.onclick = async () => {
                 again.disabled = true;
                 try { await node.freevideoRegenerateResult(value); again.textContent = text('Queued', '已加入队列'); }
-                catch (error) { again.disabled = false; node.freevideoShowFailure({exception_message: error.message}); }
+                catch (error) { again.disabled = false; node.freevideoShowFailure(error); }
             };
             links.append(again);
         }
         panel.append(stats, links, progress.stall, progress.report);
         for (const row of value.reference_trims || []) panel.append(el("div", referenceTrimText(row, text), "fv-note fv-trim-note"));
-        if (value.low_memory && !value.result_cache_hit) panel.append(el("div", text('This video used the low-memory mode for this GPU, so it took longer than usual. A lower resolution or a shorter video runs faster.', '这段视频使用了省显存方式，所以比平时慢。降低分辨率或缩短时长会更快。'), "fv-note"));
-        if (value.thermal && !value.result_cache_hit) panel.append(el("div", thermalText(value.thermal, text), "fv-note"));
+        if (value.low_memory && !value.result_cache_hit) resultNotes.push(el("div", text('This video used the low-memory mode for this GPU, so it took longer than usual. A lower resolution or a shorter video runs faster.', '这段视频使用了省显存方式，所以比平时慢。降低分辨率或缩短时长会更快。'), "fv-note"));
+        if (value.thermal && !value.result_cache_hit) resultNotes.push(el("div", thermalText(value.thermal, text), "fv-note"));
+        if (value.encoder_file) {
+            const note = el("div", encoderFileText(value.encoder_file, text), "fv-note");
+            const path = encoderFilePath(value.encoder_file);
+            if (path) note.append(el('pre', path, 'fv-encoder-path'));
+            resultNotes.push(note);
+        }
+        panel.append(...resultNotes);
         warn();
         panel.title = (unified
             ? text("Unified memory: device capacity. Process RAM is not total GPU memory, ", "统一内存为设备总量；进程内存不代表 GPU 内存总占用，")
             : text("VRAM: engine allocator peak. RAM: measured request processes, ", "显存为引擎分配器峰值，内存为请求进程实测，")) + (value.ram_metric || "unknown");
+        fitPanel();
     };
     node.freevideoUpscaleResult = async value => {
         if (node.freevideoUpscaling) return;

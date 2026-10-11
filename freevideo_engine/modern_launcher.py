@@ -218,8 +218,10 @@ def create_ui(session, *, show=True):
 
         @Slot(str)
         def link(self, value):
-            from .windows_ux import open_browser
-            self.invoke(open_browser, value)
+            # A licence may be a text file on this computer rather than a web page.
+            from .component_licenses import is_file
+            from .windows_ux import open_browser, open_text
+            self.invoke(open_text if is_file(value) else open_browser, value)
 
         @Slot(str)
         def selectSource(self, value):
@@ -339,9 +341,24 @@ def smoke_test(app, engine, window, bridge, destination):
         window.setProperty('settingsOpen', True)
         app.processEvents()
         window.setProperty('settingsOpen', False)
+        # The licence list opens, and an offline runtime's licence texts open from the package itself.
+        from PySide6.QtCore import QObject
+        from . import component_licenses as licences
+        window.setProperty('licensesOpen', True)
+        app.processEvents()
+        dialog = window.findChild(QObject, 'licensesDialog')
+        if dialog is None or not dialog.property('visible'):
+            raise RuntimeError('Packaged launcher licence list does not open')
+        window.setProperty('licensesOpen', False)
+        rows = licences.bundle(destination, dict(files=[dict(path=name) for name in ('cudart64_13.dll', 'cudnn64_9.dll', 'libiomp5md.dll')]))
+        texts = {row['key']: row['link'] for row in rows[2:]}
+        missing = {key: link for key, link in texts.items() if not licences.is_file(link) or not Path(link).is_file()}
+        if len(texts) != 4 or missing:
+            raise RuntimeError('Packaged licence texts are missing: %r' % (missing or texts))
         session.page = 'comfy'
         bridge.refresh()
-        payload.update(wizard_pages=3, launcher_page=True, download_controls=True, renderer='Qt Quick/software')
+        payload.update(wizard_pages=3, launcher_page=True, download_controls=True, renderer='Qt Quick/software',
+                       licence_texts=texts)
         build = current_build()
         if getattr(sys, 'frozen', False) and build is None:
             raise ValueError('Packaged launcher update identity is missing')

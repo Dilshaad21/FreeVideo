@@ -78,12 +78,14 @@ def digest(path):
 
 
 def plain_tree(path):
-    """No links or junctions anywhere below path; anything unreadable counts as one."""
+    """No redirects, retained originals or unreadable entries below path."""
     def unreadable(error):
         raise error
     try:
         for directory, folders, files in os.walk(path, followlinks=False, onerror=unreadable):
             for name in [*folders, *files]:
+                if '.replaced-' in name:
+                    return False
                 info = os.lstat(os.path.join(directory, name))
                 if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
                     return False
@@ -144,7 +146,8 @@ def finish_retired(parent, root, pattern):
     released = 0
     for path in sorted(Path(parent).glob('*.retired-*')):
         match = RETIRED.fullmatch(path.name)
-        if match and pattern.fullmatch(match['name']) and path.is_dir() and local_path(Path(root), path):
+        if (match and pattern.fullmatch(match['name']) and path.is_dir()
+                and local_path(Path(root), path) and plain_tree(path)):
             size = tree_bytes(path)
             shutil.rmtree(path, ignore_errors=True)
             released += size if not path.exists() else 0
@@ -178,17 +181,15 @@ def unchanged_source(path):
 
 def editable_sources(engine):
     """Sources an environment installed in editable mode still imports from."""
-    from urllib.parse import urlsplit
-    from urllib.request import url2pathname
+    from .engine_binding import editable_source
     found = set()
     for pattern in ('envs/*/Lib/site-packages/freevideo_engine-*.dist-info/direct_url.json',
                     'envs/*/lib/python3*/site-packages/freevideo_engine-*.dist-info/direct_url.json'):
         for path in Path(engine).glob(pattern):
             try:
-                value = json.loads(path.read_text(encoding='utf-8'))
-                url = urlsplit(value['url'])
-                if url.scheme == 'file' and (value.get('dir_info') or {}).get('editable'):
-                    found.add(url2pathname(url.netloc and '//' + url.netloc + url.path or url.path))
+                source = editable_source(path)
+                if source is not None:
+                    found.add(str(source))
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 found.add(None)  # An unreadable record could name any source.
     return found
@@ -262,6 +263,8 @@ def applications(parent, root, keep):
             continue
         try:
             names = sorted(item.name for item in path.iterdir())
+            if 'launcher-build.json' in names:
+                names.remove('launcher-build.json')
             if names == ['FreeVideo.app']:
                 # The Mac copy is named by its executable and Info.plist digests.
                 contents = path / 'FreeVideo.app' / 'Contents'
@@ -350,20 +353,13 @@ def shortcut_targets():
                         links.append(path)
             found |= {Path(target) for target in read_link_targets(links).values()}
         elif sys.platform == 'linux':
-            import shlex
+            from .desktop_shortcut import desktop_entry_target, linux_desktop_directory
             data = os.environ.get('XDG_DATA_HOME', '')
-            folders = [Path(data) if os.path.isabs(data) else Path.home() / '.local/share', Path.home()]
-            for path in [*(folders[0] / 'applications').glob('*.desktop'), *(folders[1] / 'Desktop').glob('*.desktop')]:
-                try:
-                    lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
-                except OSError:
-                    continue
-                for line in lines:
-                    if line.startswith('Exec=') and 'FreeVideo' in line:
-                        try:
-                            found.add(Path(shlex.split(line[5:].replace('%%', '%'))[0]))
-                        except (ValueError, IndexError):
-                            continue
+            folders = [Path(data) if os.path.isabs(data) else Path.home() / '.local/share', linux_desktop_directory()]
+            for path in [*(folders[0] / 'applications').glob('*.desktop'), *folders[1].glob('*.desktop')]:
+                target = desktop_entry_target(path)
+                if target is not None:
+                    found.add(target)
         elif sys.platform == 'darwin':
             import plistlib
             from urllib.parse import unquote, urlsplit

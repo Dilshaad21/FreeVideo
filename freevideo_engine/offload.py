@@ -415,6 +415,7 @@ class LayerOffloader:
         # The weight source outlives this pass; report only this pass's view hits.
         self.host_view_hits_start = getattr(weight_source, 'host_view_hits', 0)
         self.host_view_hit_bytes_start = getattr(weight_source, 'host_view_hit_bytes', 0)
+        self.direct_reads_start = dict(getattr(weight_source, 'read_stats', None) or {})
         self.hooks = []
         self.expected = 0
         self.closed = False
@@ -740,6 +741,11 @@ class LayerOffloader:
                 'host_view_hits': getattr(self.weight_source, 'host_view_hits', 0) - self.host_view_hits_start,
                 'host_view_hit_bytes': getattr(self.weight_source, 'host_view_hit_bytes', 0) - self.host_view_hit_bytes_start,
                 'host_view_released': getattr(self.weight_source, 'host_view_released', 0),
+                # Direct reads kept in the file cache between steps and those passing through.
+                'cache_kept_layer_count': len(getattr(self.weight_source, 'cache_kept', None) or {}),
+                'cache_kept_bytes': getattr(self.weight_source, 'cache_kept_bytes', 0),
+                **{'direct_' + name: value - self.direct_reads_start.get(name, 0)
+                   for name, value in (getattr(self.weight_source, 'read_stats', None) or {}).items()},
                 'host_prefetch': self.host_prefetch,
                 'host_prefetch_reads': self.host_prefetch_reads,
                 'host_prefetch_wait_seconds': self.host_prefetch_wait_seconds,

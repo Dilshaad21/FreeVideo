@@ -2,6 +2,7 @@
 import re
 
 from .terminal_ui import clean
+from .model_repair import PROGRESS as MODEL_REPAIR_PROGRESS
 from .model_status import NAMES
 
 
@@ -148,6 +149,7 @@ def display(value, zh=False):
     if ' · ' in value:
         return ' · '.join(display(part, True) for part in value.split(' · '))
     for prefix, translated in (
+        MODEL_REPAIR_PROGRESS,
         ('Switched current download to ', '已切换至 '), ('Connecting to ', '正在连接 '),
         ('Assemble downloaded parts', '合并已下载文件'), ('Reuse verified FP8 ', '复用模型缓存 '),
         ('Prepare FP8 ', '准备模型缓存 '), ('Verified ', '已校验 '), ('Verify ', '正在校验 '),

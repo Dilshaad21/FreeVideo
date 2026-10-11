@@ -11,6 +11,7 @@ import zipfile
 
 from .monitoring import save
 from .portable import ENCODER_LIBRARY, bundle_name, inside, listing
+from .comfy_launcher_runtime import OlderLauncher, check_source_release
 from . import disk_space
 
 PREFIX = 'FreeVideo-Windows/'
@@ -306,6 +307,7 @@ def encoder_library(runtime, config, present):
 def assemble(runtime, models, source, progress=lambda **kw: None):
     """Bind imported components to the current EXE's engine, without running it."""
     runtime = Path(runtime)
+    check_bound_source(runtime, source)
     config = runtime_config(runtime)
     candidates = []
     for root in models:
@@ -377,10 +379,24 @@ def runtime_config(runtime):
     return config
 
 
+def check_bound_source(runtime, source, value=None):
+    """Check the existing binding before copying code, models or encoder files."""
+    runtime = Path(runtime)
+    if value is None:
+        try:
+            value = json.loads((runtime / 'portable.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return
+    if not isinstance(value, dict) or not value.get('source'):
+        return
+    check_source_release(source, inside(runtime, value['source']))
+
+
 def finish(runtime, config, model, source, here=None):
     """Write portable.json for verified models, give the encoder its library copy and trust both."""
     from .desktop_runtime import materialize_source
     runtime = Path(runtime)
+    check_bound_source(runtime, source)
     library, copies = encoder_library(runtime, config, listing(runtime) if here is None else here)
     code = materialize_source(source, runtime / 'engine/launcher/source')
     variant = model['variant']
@@ -402,6 +418,18 @@ def finish(runtime, config, model, source, here=None):
     return runtime
 
 
+def rebind(runtime, source):
+    """Run another launcher's engine code in an assembled installation; environment and models stay."""
+    from .desktop_runtime import materialize_source
+    runtime = Path(runtime)
+    value = json.loads((runtime / 'portable.json').read_text(encoding='utf-8'))
+    check_bound_source(runtime, source, value)
+    code = materialize_source(source, runtime / 'engine/launcher/source')
+    value.update(source=code.relative_to(runtime).as_posix(), source_commit=code.name)
+    save(runtime / 'portable.json', value)
+    return code
+
+
 DOWNLOADING = '下载模型'
 
 
@@ -416,6 +444,7 @@ def download(runtime, source, sampling_caches, progress=lambda **kw: None, cance
     from .desktop_runtime import materialize_source
     from . import processes
     runtime = Path(runtime)
+    check_bound_source(runtime, source)
     config = runtime_config(runtime)
     code = materialize_source(source, runtime / 'engine/launcher/source')
     out = runtime / 'engine' / 'downloaded-models.json'
@@ -484,6 +513,9 @@ class Importer:
             except RuntimeMismatch as error:
                 # An earlier import no longer fits after an update: the models stay.
                 self.state = dict(self.state, status='complete', runtime_skipped=True, detail=str(error))
+            except OlderLauncher as error:
+                # Session routes error to the localized card; QML also displays detail verbatim.
+                self.state = dict(self.state, status='error', error=str(error), detail='', done=0, total=None)
             except Exception as error:
                 self.state = dict(self.state, status='error', error=str(error))
         self.thread = threading.Thread(target=work, name='freevideo-offline-prepare', daemon=True)
@@ -502,6 +534,8 @@ class Importer:
                 self.state = dict(self.state, status='prepared', ready_root=str(root))
             except RuntimeMismatch as error:
                 self.state = dict(self.state, status='complete', runtime_skipped=True, detail=str(error))
+            except OlderLauncher as error:
+                self.state = dict(self.state, status='error', error=str(error), detail='', done=0, total=None)
             except Exception as error:
                 self.state = dict(self.state, status='error', error=str(error))
         self.thread = threading.Thread(target=work, name='freevideo-model-download', daemon=True)

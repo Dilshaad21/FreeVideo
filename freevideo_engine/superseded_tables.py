@@ -26,7 +26,8 @@ from .variant_cleanup import inside, redirected
 
 MANIFEST = Path(__file__).with_name('superseded_tables.json')
 LEFTOVER = re.compile(r'(?P<index>\d{2})\.(?P<kind>safetensors|json)'
-                      r'(?:\.partial(?:-\d{1,20}|\.source\.json)?|\.[a-z]{1,16}-\d{1,20})?')
+                      r'(?:\.partial(?:-\d{1,20}|\.source\.json)?|\.(?:hash-rejected|oversized-response|oversized|'
+                      r'resume-unavailable|restart-approved|rejected|switch-retained|local-import)-\d{1,20})?')
 RECEIPT_LIMIT = 4096
 IDENTITY_LIMIT = 65536
 

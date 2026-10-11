@@ -160,15 +160,25 @@ def _prepare(root, comfy, machine, run, download, repair=False):
         env_root = previous_environment(root, identity) or env_root
     python = env_root / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     receipt = env_root / 'freevideo-host.json'
+    repair_marker = env_root / 'freevideo-host-repair.json'
+    repair = repair or repair_marker.exists()
     # The receipt records the dependency contract, not that every package is
-    # still there: a repair installs and checks the packages again. uv only
-    # verifies what is already installed.
-    if repair or not (python.is_file() and receipt.is_file() and json.loads(receipt.read_text(encoding='utf-8')) == identity):
+    # still there: uv only checks versions, so repair checks the files too.
+    try:
+        recorded = python.is_file() and json.loads(receipt.read_text(encoding='utf-8')) == identity
+    except (OSError, ValueError):
+        recorded = False
+    if repair or not recorded:
+        if repair and not repair_marker.exists():
+            save(repair_marker, dict(started=time.time()))
         uv = root / 'tools' / ('uv.exe' if os.name == 'nt' else 'uv' if sys.platform == 'darwin' else 'uv-x86_64-unknown-linux-gnu/uv')
         if not uv.is_file():
             raise ValueError('The engine download tool is missing. Run engine repair first.')
         if not python.is_file():
-            execute([uv, 'venv', '--python', machine['python'], env_root], env, 'Create ComfyUI Python environment')
+            create = [uv, 'venv', '--python', machine['python'], env_root]
+            if repair:
+                create.insert(2, '--allow-existing')
+            execute(create, env, 'Create ComfyUI Python environment')
         # Match the already validated CUDA packages. Hardlinked uv cache
         # entries share their disk bytes without sharing a writable env.
         pins = directory / ('native-constraints.txt' if sys.platform == 'darwin' else 'cuda-constraints.txt')
@@ -176,6 +186,28 @@ def _prepare(root, comfy, machine, run, download, repair=False):
         pins.write_text('\n'.join(rows) + '\n', encoding='utf-8')
         torch_version = importlib.metadata.version('torch')
         cuda = torch_version.split('+', 1)[1] if '+' in torch_version else 'cpu'
+        from .runtime_libraries import damaged, dependency_closure, incomplete, normalize_name, reinstall_arguments
+        reported = set()
+        reported_unknown = False
+        def broken_packages():
+            nonlocal reported_unknown
+            required = dependency_closure(python, requirements, rows)
+            found = set(incomplete(python) + damaged(python))
+            if required is None:
+                if not reported_unknown:
+                    print('Could not determine all ComfyUI dependencies from requirements; no damaged packages will be excluded.', flush=True)
+                    reported_unknown = True
+                return sorted(found)
+            outside = {name for name in found if normalize_name(name) not in required}
+            if outside - reported:
+                print("Not part of ComfyUI's requirements, left as is: " + ', '.join(sorted(outside - reported)), flush=True)
+                reported.update(outside)
+            return sorted(found - outside)
+        broken = broken_packages()
+        gpu = [name for name in broken if normalize_name(name) in
+               ('torch', 'torchvision', 'torchaudio', 'triton', 'triton-windows')
+               or normalize_name(name).startswith('nvidia-')]
+        packages = [name for name in broken if name not in gpu]
         ui.phase('Prepare ComfyUI GPU packages', stage_offset + 1, stage_total)
         def package_install(family, command, label):
             try:
@@ -193,18 +225,23 @@ def _prepare(root, comfy, machine, run, download, repair=False):
                     from .install_disk import check_floor
                     check_floor((root, comfy))
             prepared = install(uv, python, rows, cuda, root=root, networking=plan, env=env, ui=ui,
-                run=lambda args, environment: execute(args, environment, 'Prepare ComfyUI GPU packages'), check=check)
+                run=lambda args, environment: execute(args, environment, 'Prepare ComfyUI GPU packages'),
+                check=check, reinstall=gpu)
         if not prepared:
             package_install('pypi' if sys.platform == 'darwin' else 'torch-' + cuda,
-                lambda environment, _: execute([uv, 'pip', 'install', '--python', python, *rows], environment, 'Prepare ComfyUI GPU packages'),
+                lambda environment, _: execute([uv, 'pip', 'install', '--python', python, *reinstall_arguments(gpu), *rows], environment, 'Prepare ComfyUI GPU packages'),
                 'Prepare ComfyUI GPU packages')
         ui.phase('Install ComfyUI packages', stage_offset + 2, stage_total)
         package_install('pypi', lambda environment, _: execute(
-            [uv, 'pip', 'install', '--python', python, '-r', requirements, '-c', pins], environment, 'Install ComfyUI packages'),
+            [uv, 'pip', 'install', '--python', python, *reinstall_arguments(packages), '-r', requirements, '-c', pins], environment, 'Install ComfyUI packages'),
             'Install ComfyUI packages')
         ui.phase('Check ComfyUI dependencies', stage_offset + 3, stage_total)
         execute([uv, 'pip', 'check', '--python', python], env, 'Check ComfyUI dependencies')
+        remaining = broken_packages()
+        if remaining:
+            raise RuntimeError('ComfyUI package files are still missing or damaged after reinstalling them: ' + ', '.join(remaining))
         save(receipt, identity)
+        repair_marker.unlink(missing_ok=True)
     ui.phase('Finish ComfyUI setup', stage_offset + 4, stage_total)
     result = dict(python=str(python), environment=str(env_root), identity=identity)
     save(root / 'launcher' / 'comfy-host.json', result)

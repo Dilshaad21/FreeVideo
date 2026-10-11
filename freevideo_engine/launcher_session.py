@@ -30,6 +30,8 @@ RECEIPT_POLL_SECONDS = 5
 
 
 class Session:
+    # A launcher started from an offline package (portable_launcher.PortableSession).
+    bundled = False
     # Update flow defaults; __init__ starts each launcher session from these.
     update_snoozed = {}
     update_intent = None
@@ -43,7 +45,7 @@ class Session:
     bridge_written = (0., None)
     update_checked = 0.
     page = 'comfy'
-    selected = installed_versions = None
+    selected = installed_versions = engine_identity = bundled_identity = None
     release_details = None
     # The source whose earlier copies were removed once ComfyUI ran it.
     old_versions_retired = None
@@ -79,6 +81,7 @@ class Session:
             self.form['new_comfy'] = False
         self.language = saved['language'] if 'language' in saved else default_language()
         self.selected = saved.get('installation')
+        self.repair_request = None
         self.saved_setup = saved.get('setup', {})
         self.page = 'comfy'
         self.token = ''
@@ -185,6 +188,7 @@ class Session:
             raise ValueError('Unknown model download method')
         if self.form[key] == value:
             return
+        self.repair_request = None
         self.form[key] = value
         if key in ('new_comfy', 'destination', 'comfy'):
             # A remembered installation's engine belongs to that installation;
@@ -239,6 +243,7 @@ class Session:
             return
         if not paths:
             return
+        self.repair_request = None
         destination = (Path(self.form['destination']).expanduser().resolve() if self.form['new_comfy']
                        else self.engine_root().parent)
         self.importer.start(paths, destination)
@@ -261,9 +266,10 @@ class Session:
         from .offline_packages import check_runtime_platform
         check_runtime_platform()
         from .portable_launcher import PortableController
-        controller = PortableController(root)
+        controller = PortableController(root, bundled=self.source)
         controller.restore({'url': self.form['url']})
         self.controller.close()
+        self.repair_request = None
         self.controller = controller
         self.form['offline_runtime'] = str(root)
         self.remember(controller.selection)
@@ -289,14 +295,20 @@ class Session:
                 self.controller.cancel()
             return
         self.error = ''
+        if name in ('setup', 'launcher', 'launch', 'update-engine'):
+            self.repair_request = None
         if name == 'repair':
             # One click instead of Settings › repair switch › Installation › Check:
             # plan a repair of this installation. The review installs it, and
             # setup first stops this launcher's own idle ComfyUI.
             if not self.can_repair():
                 return
+            # Restore the selected target before freezing this session's repair;
+            # the editable setup form may currently describe another installation.
+            self.remember(self.selected, persist=False)
+            self.repair_request = dict(self.form, repair=True)
             self.persist()
-            self.controller.run('inspect', dict(self.form, token=self.token, repair=True))
+            self.controller.run('inspect', dict(self.repair_request, token=self.token))
             self.page = 'progress'
             self.model_groups = []
             self.started = time.monotonic()
@@ -316,7 +328,7 @@ class Session:
                 # Recompute the plan and live disk space; never install a stale
                 # failed review or discard completed/resumable downloads.
                 self.persist()
-                self.controller.run('inspect', dict(self.form, token=self.token))
+                self.controller.run('inspect', dict(self.repair_request or self.form, token=self.token))
                 self.page = 'progress'
                 self.started = time.monotonic()
             return
@@ -340,6 +352,13 @@ class Session:
             self.page = 'comfy' if self.page == 'models' else 'models'
             return
         if name == 'browser':
+            if self._host_repair_waiting():
+                # Finish a repair interrupted earlier before opening the page.
+                # Connect stops this launcher's idle ComfyUI first and leaves a
+                # running job alone; the page opens when it is done.
+                self.browser_attempted = False
+                self.browser_error = ''
+                self.controller.run('connect'); return
             self.open_browser(); return
         if name == 'delete_archives':
             self.delete_archives(); return
@@ -362,6 +381,8 @@ class Session:
         self.browser_attempted = False
         self.port_notice_url = None
         self.browser_error = ''
+        if self.page == 'launcher':
+            self.repair_request = None
         if self.page == 'launcher' and getattr(self.controller, 'fixed_environment', False) is True:
             consent = self.controller.root / 'engine/portable-consent.json'
             if not consent.exists():
@@ -380,7 +401,7 @@ class Session:
             self.controller.run('connect')
         else:
             self.persist()
-            self.controller.run('inspect', dict(self.form, token=self.token))
+            self.controller.run('inspect', dict(self.repair_request or self.form, token=self.token))
             self.page = 'progress'
             self.model_groups = []
         self.started = time.monotonic()
@@ -390,6 +411,13 @@ class Session:
         return (bool(self.selected) and getattr(self.controller, 'fixed_environment', False) is not True
                 and not (self.controller.busy or self.importer.busy or self.cleaner.busy or self.closing
                          or self.engine_updating or self.upgrade.active or self.model_switch))
+
+    def repair_unavailable(self):
+        """Why Repair is missing: it appears once a task ends, never in an offline
+        environment, and needs an installed engine (WITHOUT_REPAIR's reasons)."""
+        if getattr(self.controller, 'fixed_environment', False) is True:
+            return 'bundled' if self.bundled else 'offline'
+        return 'busy' if self.selected else 'none'
 
     def repairs_comfy(self):
         """ComfyUI runs in the environment this launcher made, so Repair reinstalls its packages."""
@@ -505,6 +533,7 @@ class Session:
                     upgrade.waiting_for('comfy')
                 return
             self.model_switch = 'inspect'
+            self.repair_request = None
             upgrade.switching()
             self.controller.run('inspect', dict(self.form, token=self.token, repair=True, prepared_format='int8'))
             self.page = 'progress'
@@ -545,6 +574,13 @@ class Session:
         query['freevideo_lang'] = 'zh'
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path,
                            urlencode(query), parsed.fragment))
+
+    def _host_repair_waiting(self):
+        """A repair of the ComfyUI environment this launcher made and runs, not finished yet."""
+        from .comfy_launcher_runtime import host_repair_pending
+        selected = self.controller.selection or {}
+        return (not self.controller.busy and self.controller.owns_server() and bool(selected.get('python'))
+                and managed_frontend(selected) and host_repair_pending(selected['python']))
 
     def open_browser(self):
         if self.controller.state.get('status') != 'open':
@@ -649,9 +685,11 @@ class Session:
         An older launcher opened later would otherwise offer a downgrade."""
         if not (self.selected and self.controller.state.get('engine_update_available')):
             return False
-        bundled = self.source_stamp(self.source)[1]
-        installed = self.source_stamp(self.selected.get('source'))[1]
-        return not (bundled and installed and installed > bundled)
+        # The order the installation check applies: an offered update is never refused there.
+        from .release_notes import older
+        self.bundled_identity = self.stamped(self.source, self.bundled_identity)
+        self.engine_identity = self.stamped((self.selected or {}).get('source'), self.engine_identity)
+        return not older(self.bundled_identity[1], self.engine_identity[1])
 
     def update_key(self):
         """The current reminder: a newer launcher first, then the bundled engine."""
@@ -690,6 +728,7 @@ class Session:
             if source == 'browser':
                 self.bridge_pending = True
             return
+        self.repair_request = None
         if self.updater and token.strip():
             self.updater.token = token.strip()
         self.update_source = source
@@ -796,6 +835,7 @@ class Session:
         self.update_waiting = bool(busy)
         if busy is not False:
             return
+        self.repair_request = None
         self.update_intent = None
         self.engine_updating = self.engine_autoinstall = True
         # Open pages reload themselves after the restart; without any, open
@@ -916,6 +956,26 @@ class Session:
     def installed_version(self):
         return self.source_stamp((self.selected or {}).get('source'))[0]
 
+    @staticmethod
+    def stamped(source, cached):
+        """(key, stamp) of an engine source, read again only when its stamp file changes."""
+        if not source:
+            return (None, {})
+        try:
+            changed = (Path(source) / 'freevideo_engine' / 'build-identity.json').stat().st_mtime_ns
+        except OSError:
+            changed = None
+        key = (str(source), changed)
+        if cached is not None and cached[0] == key:
+            return cached
+        from .desktop_runtime import source_release
+        return (key, source_release(source))
+
+    def engine_release(self):
+        """The stamp of the engine the selected installation runs."""
+        self.engine_identity = self.stamped((self.selected or {}).get('source'), self.engine_identity)
+        return self.engine_identity[1]
+
     def installed_product_version(self):
         """The product version of the engine the selected installation runs, if it says."""
         source = (self.selected or {}).get('source')
@@ -935,6 +995,7 @@ class Session:
         key = self.update_key()
         view.update(engine=self.engine_update_pending(), current=__version__,
                     current_release=public_details(self.updater.current) if self.updater else self.release_details,
+                    engine_release=self.engine_release(),
                     installed=self.installed_version(), phase=self.update_phase(), key=key,
                     channel=self.updater.current.get('channel') if self.updater else None,
                     track=self.updater.current.get('track', 'stable') if self.updater else 'stable',
@@ -973,6 +1034,7 @@ class Session:
             pass
 
     def close(self):
+        self.repair_request = None
         self.importer.cancelled.set()
         if getattr(self, '_closed', False):
             return
@@ -1047,6 +1109,7 @@ class Session:
             self.model_groups = groups
         selection = row.get('selection')
         if not busy and selection and selection.get('ready') and (row.get('deployed') or row.get('status') in ('open', 'restart-required')):
+            self.repair_request = None
             if selection != self.selected:
                 self.remember(selection)
             if row.get('action') == 'install' or row.get('status') in ('open', 'restart-required'):
@@ -1188,6 +1251,17 @@ class Session:
         return self.t('1 ZIP file could not be deleted.' if failed == 1 else '%d ZIP files could not be deleted.' % failed,
                       '%d 个压缩包没能删除。' % failed)
 
+    def licenses(self, row):
+        """What the consent accepts, listed when the user reads the licences: an offline runtime's, or the installation plan's."""
+        from .component_licenses import MODEL, is_file, named
+        if getattr(self.controller, 'fixed_environment', False) is True:
+            rows = self.controller.licenses
+        else:
+            rows = [named(url) for url in row.get('plan', {}).get('licenses') or ()]
+        return [dict(key=value['key'], name=self.t(*value['name']), license=self.t(*value['license']),
+                     terms=self.t(*value['terms']) if value['terms'] else '', url=value['link'], file=is_file(value['link']))
+                for value in rows or [MODEL]]
+
     def snapshot(self):
         from .failure_details import REPAIR_KINDS, launcher_failure, redacted_launcher_error
         from .launcher_copy import display, progress_view, source_name
@@ -1216,7 +1290,8 @@ class Session:
         shortcut = row.get('shortcut') or {}
         if shortcut.get('status') == 'failed':
             errors.append(shortcut.get('error_zh' if zh else 'error') or shortcut.get('error', ''))
-        error = redacted_launcher_error('\n'.join(str(e) for e in errors if e),
+        raw_error = '\n'.join(str(e) for e in errors if e)
+        error = redacted_launcher_error(raw_error,
                                         [(self.token, '<REDACTED>')] if self.token else [])
         by_id = {r['id']: r for r in self.model_groups}
         ready = bool(row.get('selection', {}).get('ready') or row.get('status') == 'open')
@@ -1271,6 +1346,8 @@ class Session:
             preferences = dict(source='auto', proxy_mode='auto')
         source = preferences['source']
         plan = row.get('plan', {})
+        from .model_repair import review_lines
+        replace_models = review_lines(plan.get('replace_models', []), zh=zh)
         estimate = []
         if plan.get('disk_mode') == 'extreme':
             estimate.append(self.t('Space saver (automatic)', '极限省空间（自动启用）'))
@@ -1297,7 +1374,14 @@ class Session:
                     ok=entry.get('ok', False), rate=speed_text(entry, self.language.startswith('zh'))))
         from .sampling_assets import total_bytes
         failure = launcher_failure(error, zh=self.language.startswith('zh'), can_repair=self.can_repair(),
-                                   repairs_comfy=self.repairs_comfy())
+                                   repairs_comfy=self.repairs_comfy(), unavailable=self.repair_unavailable())
+        if failure.get('path'):
+            # The local repair instruction needs the actual file location; copied details stay redacted.
+            from .model_repair import MISMATCH_PATH
+            for line in reversed(raw_error.splitlines()):
+                if line.startswith(MISMATCH_PATH + ': ') and line[len(MISMATCH_PATH) + 2:]:
+                    failure['path'] = line[len(MISMATCH_PATH) + 2:]
+                    break
         disk = self.disk_view(row, failure)
         if disk and str(failure.get('kind', '')).startswith('disk'):
             failure = launcher_failure(error, zh=self.language.startswith('zh'),
@@ -1344,7 +1428,8 @@ class Session:
             settings_path=str(self.store.primary),
             review_id=row.get('plan', {}).get('plan_id', ''),
             consent=self.t('I accept the installation plan and model / toolkit licenses.', '我同意安装计划及模型／工具包许可证。'),
-            portable=False, needs_consent=bool(getattr(self.controller, 'fixed_environment', False) is True
+            licenses=self.licenses(row), portable=False, needs_consent=bool(getattr(self.controller, 'fixed_environment', False) is True
                 and not (self.controller.root / 'engine/portable-consent.json').exists()),
             review=dict(engine=str(row.get('selection', {}).get('engine', self.form['engine'])),
+                        replace_models=replace_models,
                         comfy=str(row.get('selection', {}).get('root', self.form['comfy']))))

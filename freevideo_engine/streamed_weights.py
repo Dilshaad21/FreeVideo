@@ -1,7 +1,9 @@
 """Reopen immutable safetensor layer views only while filling an offload slot."""
 from contextlib import contextmanager
+import functools
 from pathlib import Path
 import threading
+import time
 
 
 _TORCH_DTYPES = {'BOOL': 'bool', 'U8': 'uint8', 'I8': 'int8', 'I16': 'int16',
@@ -277,6 +279,74 @@ HOST_VIEW_RESERVE = int(2.5 * 2**30)
 # so a request that grows (a larger refine pass, readouts, another program)
 # trades them for disk reads instead of pushing Windows toward its floor.
 HOST_VIEW_SHED = int(1.5 * 2**30)
+# Direct reads of one step can exceed the memory left for the file cache. The
+# cache then holds the layers read last and the next step starts with the
+# first ones, so every layer comes from the drive again. Layers that fit beside
+# one passing layer and this slack are kept: read at normal page priority. The
+# rest are read at Windows' lowest page priority, whose pages the standby list
+# gives up first, to this request's next read or to any other program.
+CACHE_KEEP_SLACK = 512 * 2**20
+_MEMORY_PRIORITY_VERY_LOW = 1
+
+
+@functools.lru_cache(maxsize=None)
+def _thread_page_priority():
+    """Swap the calling thread's page priority on Windows: a function or None.
+
+    The function sets the given priority and returns the previous one, or
+    returns None and changes nothing when Windows refuses. It is None on other
+    systems, on Windows versions without SetThreadInformation and with
+    FREEVIDEO_PAGE_PRIORITY=off, where every read keeps normal priority.
+    """
+    import os
+    from .system import windows
+    if not windows() or os.environ.get('FREEVIDEO_PAGE_PRIORITY', 'auto').lower() in ('off', '0', 'false'):
+        return None
+    import ctypes
+    from ctypes import wintypes
+    try:
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        current, get, set_ = (kernel32.GetCurrentThread, kernel32.GetThreadInformation,
+                              kernel32.SetThreadInformation)
+    except (AttributeError, OSError):
+        return None
+    current.restype = wintypes.HANDLE
+    current.argtypes = ()
+    for function in (get, set_):
+        # THREAD_INFORMATION_CLASS ThreadMemoryPriority = 0, MEMORY_PRIORITY_INFORMATION.
+        function.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.POINTER(wintypes.ULONG), wintypes.DWORD)
+        function.restype = wintypes.BOOL
+
+    def swap(priority):
+        # A hint must never fail a read: any refusal leaves the priority as it was.
+        try:
+            info = wintypes.ULONG()
+            if not get(current(), 0, ctypes.byref(info), ctypes.sizeof(info)):
+                return None
+            previous = info.value
+            info.value = priority
+            return previous if set_(current(), 0, ctypes.byref(info), ctypes.sizeof(info)) else None
+        except (ctypes.ArgumentError, OSError, ValueError):
+            return None
+
+    # Setting this thread's own priority again proves the calls work here.
+    previous = swap(_MEMORY_PRIORITY_VERY_LOW)
+    if previous is None:
+        return None
+    swap(previous)
+    return swap
+
+
+@contextmanager
+def _low_page_priority(enabled):
+    """Read at the lowest page priority inside this block, on this thread only."""
+    swap = _thread_page_priority() if enabled else None
+    previous = swap(_MEMORY_PRIORITY_VERY_LOW) if swap is not None else None
+    try:
+        yield
+    finally:
+        if previous is not None:
+            swap(previous)
 
 
 def host_view_fits(size, reserve=HOST_VIEW_RESERVE):
@@ -312,6 +382,13 @@ class SafetensorLayers:
         self.host_view_hits = 0
         self.host_view_hit_bytes = 0
         self.host_view_released = 0
+        # Direct-read layers kept in the file cache between steps (index: bytes),
+        # and the direct reads of kept and passing layers.
+        self.cache_kept = {}
+        self.cache_kept_bytes = 0
+        self.cache_lock = threading.Lock()
+        self.read_stats = dict(kept_layers=0, kept_bytes=0, kept_seconds=0.,
+                               passed_layers=0, passed_bytes=0, passed_seconds=0.)
         for path in sorted(set(Path(p).resolve() for p in paths)):
             self.files[path] = self.identity(path)
             with _open_safetensors(path, framework='np') as handle:
@@ -426,17 +503,59 @@ class SafetensorLayers:
                     target = buffers[dtype][begin:begin + size]
                     pieces += [(path, start + at, target[at:at + _READ_PIECE])
                                for at in range(0, size, _READ_PIECE)]
-            self._read_pieces(pieces)
+            size = sum(row[1] for entries in reads.values() for row in entries)
+            # A layer about to become a view stays in this process, at normal priority.
+            keep = self._keeps_cached(index, size) or (
+                self.host_views is not None and host_view_fits(size, self.host_view_reserve))
+            started = time.monotonic()
+            self._read_pieces(pieces, low_page_priority=not keep)
+            kind = 'kept' if keep else 'passed'
+            with self.cache_lock:
+                self.read_stats[kind + '_layers'] += 1
+                self.read_stats[kind + '_bytes'] += size
+                self.read_stats[kind + '_seconds'] += time.monotonic() - started
             if self.host_views is not None:
-                size = sum(row[1] for entries in reads.values() for row in entries)
                 if host_view_fits(size, self.host_view_reserve):
                     self._adopt(index, reads, size)
+                    if index in self.host_views:
+                        self._forget_cached(index)
         finally:
             for path in reads:
                 self.check(path)
         return True
 
-    def _read_pieces(self, pieces):
+    def _keeps_cached(self, index, size):
+        """Whether this layer's direct read stays in the file cache for the next step.
+
+        A layer is kept while the kept layers, one passing layer and
+        CACHE_KEEP_SLACK fit in available memory, which counts cached pages.
+        A kept layer is given up only once the kept layers and the slack no
+        longer fit, one layer of hysteresis. Without page priority every read
+        is kept, as before.
+        """
+        if _thread_page_priority() is None:
+            return True
+        from .system import system_memory
+        memory = system_memory()
+        available = memory.get('physical_available_bytes') or memory['available_bytes']
+        with self.cache_lock:
+            if index in self.cache_kept:
+                if self.cache_kept_bytes + CACHE_KEEP_SLACK <= available:
+                    return True
+                self.cache_kept_bytes -= self.cache_kept.pop(index)
+                return False
+            if self.cache_kept_bytes + 2 * size + CACHE_KEEP_SLACK <= available:
+                self.cache_kept[index] = size
+                self.cache_kept_bytes += size
+                return True
+            return False
+
+    def _forget_cached(self, index):
+        with self.cache_lock:
+            if index in self.cache_kept:
+                self.cache_kept_bytes -= self.cache_kept.pop(index)
+
+    def _read_pieces(self, pieces, low_page_priority=False):
         """Read (path, position, destination) pieces on a few handles at once.
 
         One handle reading a streamed layer tensor by tensor leaves most of a
@@ -447,7 +566,8 @@ class SafetensorLayers:
         Loading already reads its blocks like this (tensor_io.ParallelReads).
         Each piece fills exactly its bytes of the slot, and every handle is
         checked against the file it opened. FREEVIDEO_READ_THREADS=1 reads on
-        the calling thread alone.
+        the calling thread alone. With low_page_priority every reader reads at
+        the lowest page priority and restores its own afterwards.
         """
         import os
         from contextlib import ExitStack
@@ -466,7 +586,7 @@ class SafetensorLayers:
                 state['active'] += 1
             try:
                 streams = {}
-                with ExitStack() as opened:
+                with ExitStack() as opened, _low_page_priority(low_page_priority):
                     for path, position, target in group:
                         if state['stop']:
                             return

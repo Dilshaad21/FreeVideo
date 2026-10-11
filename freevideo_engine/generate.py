@@ -307,6 +307,12 @@ def _runtime_libraries(error, record):
         pass
 
 
+def encoder_size_mismatch(encoding):
+    # Cache hits retain the checkpoint with the original request's metrics.
+    checkpoint = encoding.get('checkpoint') or (encoding.get('cache_source_metrics') or {}).get('checkpoint') or {}
+    return checkpoint.get('tested_size') is False
+
+
 def run(args):
     """Also retain admission/import failures before the main request starts."""
     output = Path(args.out).expanduser().resolve()
@@ -512,11 +518,15 @@ def _run(args):
                 encode_request = temporary / 'encode.json'
                 encode_request.write_text(json.dumps(encoding) + '\n', encoding='utf-8')
                 cached = input_cache.get(conditioning_key, condition) if input_cache else None
-                if cached and (cached.get('success') is not True or cached.get('conditioning_shape', [])[1:] != [5120]):
+                if cached and encoder_size_mismatch(cached):
+                    cached = None
+                elif cached and (cached.get('success') is not True or cached.get('conditioning_shape', [])[1:] != [5120]):
                     condition.rename(condition.with_name('conditioning.cache-rejected-' + str(time.time_ns()) + '.pt'))
                     cached = None
                 if not cached and state and task_for(media) == 't2va':
                     cached = tuning.cached_conditioning(state, encoding['prompt'], condition)
+                    if cached and encoder_size_mismatch(cached):
+                        cached = None
                 if cached:
                     save(destination.with_suffix('.encoding.json'), cached)
                     destination.with_suffix('.encoding.log').write_text('Reused validated local text conditioning; encoder model was not loaded.\n', encoding='utf-8')
@@ -561,14 +571,15 @@ def _run(args):
                         'prompt_characters': len(encoding['prompt'])})
                 report['encoding'] = json.loads(destination.with_suffix('.encoding.json').read_text(encoding='utf-8'))
                 report['encoder_process_exited_before_video'] = not bool(os.environ.get('FREEVIDEO_RESIDENT_SESSION'))
-                if input_cache and not cached:
+                cacheable = not cached and not encoder_size_mismatch(report['encoding'])
+                if input_cache and cacheable:
                     try:
                         report['input_cache']['conditioning_saved'] = input_cache.put(conditioning_key, condition, report['encoding'])
                         if input_cache.note:
                             report['input_cache']['note'] = input_cache.note
                     except (OSError, ValueError) as error:
                         report['input_cache']['note'] = str(error)
-                if state and not cached and task_for(media) == 't2va':
+                if state and cacheable and task_for(media) == 't2va':
                     try:
                         tuning.remember_conditioning(state, encoding['prompt'], condition, report['encoding'])
                         tuning.save_state(state)

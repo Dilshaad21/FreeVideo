@@ -14,6 +14,7 @@ from .install_tuning import required_models, hf_receipt, unchanged_before
 from . import network
 from .storage import record_download, compact_sources, fingerprint
 from . import model_transfer
+from . import model_repair
 
 
 def model_headers(source):
@@ -75,6 +76,18 @@ def models(plan):
         files += install_files(bool(plan.get('sampling_caches')))
     mode = plan.get('verification', 'auto')
     from .local_models import key as local_key, import_file
+    lock = threading.RLock()
+
+    def emit(event, **details):
+        with lock:
+            # One write keeps concurrent progress events on separate lines.
+            import sys
+            sys.stdout.write(json.dumps(dict(event=event, **details)) + '\n')
+            sys.stdout.flush()
+
+    replacements = {entry['path']: entry for entry in plan.get('replace_models', [])}
+    if len(replacements) != len(plan.get('replace_models', [])):
+        raise ValueError(model_repair.CHANGED)
     local_files, missing = [], []
     destinations = set()
     # Cheap metadata only: start known downloads without first hashing tens of
@@ -85,15 +98,25 @@ def models(plan):
         if path in destinations:
             raise ValueError('Duplicate model destination in installation plan: ' + str(path))
         destinations.add(path)
+        approved = replacements.get(str(path))
+        if approved:
+            if approved.get('expected_bytes') != row['bytes'] or approved.get('file') != path.name:
+                raise ValueError(model_repair.CHANGED)
+            model_repair.check(path, approved)
         local = (plan.get('local_models') or {}).get('matches', {}).get(local_key(row))
         entry = (row, path, hf_directory, local)
-        (local_files if path.exists() or path.is_symlink() or local else missing).append(entry)
+        (local_files if not approved and (path.exists() or path.is_symlink() or local) else missing).append(entry)
+    if set(replacements) - {str(path) for path in destinations}:
+        raise ValueError(model_repair.CHANGED)
     space_saver = plan.get('disk_mode') == 'extreme'
     if space_saver:
         from .install_disk import check_models
-        check_models(local_files + missing)
+        check_models(local_files + missing, replacements=replacements)
+    for name, approved in replacements.items():
+        retained = model_repair.retain(root, Path(name), approved)
+        stamps.pop(name, None)
+        emit('model_retained', file=name, keep_as=approved['keep_as'], retained=str(retained), bytes=approved['bytes'])
     stopped = threading.Event()
-    lock = threading.RLock()
     failures = []
     ready = [0]
 
@@ -103,14 +126,6 @@ def models(plan):
         if space_saver:
             from .install_disk import check_floor
             check_floor((root, model_dir, encoder_dir))
-
-    def emit(event, **details):
-        with lock:
-            # One write preserves JSON lines when the verifier and downloader
-            # both report progress. The only retained buffers are hash chunks.
-            import sys
-            sys.stdout.write(json.dumps(dict(event=event, **details)) + '\n')
-            sys.stdout.flush()
 
     from .model_status import ModelProgress, NAMES, family
     model_progress = ModelProgress([(entry[0], 'found') for entry in local_files] +
@@ -147,10 +162,16 @@ def models(plan):
                         last[0] = now
                 progress(0, row['bytes'])
                 prior = {str(path): stamps.get(str(path), {})}
+                before = model_repair.identity(path)
                 if verified(path, row, prior, mode=mode, hf_directory=hf_directory, progress=progress):
                     complete(row, path, prior[str(path)], 'verify')
                 elif path.exists() or path.is_symlink():
-                    raise ValueError('Existing model failed pinned integrity check; preserved without overwrite: ' + str(path))
+                    if before is None:
+                        raise ValueError('Existing model failed integrity check; preserved without overwrite: ' + str(path))
+                    model_repair.record(root, path, row, before)
+                    raise ValueError(model_repair.MISMATCH + ': ' + path.name + '\n' +
+                                     model_repair.MISMATCH_PATH + ': ' + str(path) + '\n' +
+                                     model_repair.CLI_FAILURE.format(file=path.name))
                 elif local:
                     def local_progress(value):
                         check()

@@ -6,6 +6,8 @@ Button {
     property bool primary: false
     property bool selected: false
     property bool danger: false
+    // A text link: accent text, no frame.
+    property bool link: false
     implicitHeight: Math.max(theme.height, contentItem.implicitHeight + 14)
     implicitWidth: Math.max(80, contentItem.implicitWidth + leftPadding + rightPadding)
     leftPadding: 16; rightPadding: 16
@@ -16,6 +18,7 @@ Button {
     contentItem: Text {
         text: control.text; font: control.font
         color: control.primary ? theme.bg : control.danger ? theme.danger : control.selected ? theme.accent
+             : control.link ? (control.hovered ? theme.accentHover : theme.accent)
              : control.flat && !control.hovered ? theme.muted : theme.text
         horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
         wrapMode: Text.Wrap

@@ -1,0 +1,6 @@
+﻿TinyCC (tcc.exe, libtcc.dll and its runtime files under python/Lib/site-packages/triton/runtime/tcc/
+of the FreeVideo Windows runtime) is licensed under the GNU LGPL v2.1, in TinyCC-LGPL-2.1.txt beside
+this file. Its complete source code, TinyCC at commit 05bb79344d84983a4d4e7ddba36af0fdc098a3c8 (tcc
+0.9.28rc 2026-03-07_mob@05bb793, as tcc.exe of triton-windows 3.7.1.post27 reports), is at
+https://github.com/TinyCC/tinycc/tree/05bb79344d84983a4d4e7ddba36af0fdc098a3c8. We will also provide
+it on request: https://github.com/FlashML-org/FreeVideo/issues

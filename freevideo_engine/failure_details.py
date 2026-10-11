@@ -93,13 +93,73 @@ PLACE_RULES = (
 )
 
 
-# Failures the launcher's Repair button fixes, and what to do where it has none
-# (no installed engine yet, or a fixed offline environment).
+from .model_repair import (UNCHANGED as MODEL_UNCHANGED, OFFLINE as MODEL_OFFLINE, BUSY as MODEL_BUSY,  # noqa: E402
+                           FIRST_INSTALL as MODEL_FIRST_INSTALL, CHANGED_WHY, CHANGED_WAYS)
+
+
+def _joined(head, tail):
+    return tuple(first + (' ' if zh == 0 else '') + rest for zh, (first, rest) in enumerate(zip(head, tail)))
+
+
+def _model_unchanged(tail):
+    return _joined(MODEL_UNCHANGED, tail)
+
+
+# Failures the launcher's Repair button fixes, and what to do where it has none, by
+# why it has none (Session.repair_unavailable): a task still running ('busy'), an
+# offline package ('bundled') or imported offline environment ('offline') it never
+# repairs, or no installed engine yet ('none').
+WITHOUT_REPAIR_NONE = ('Return to Installation and check the same folder to restore missing dependencies.',
+                       '返回安装设置，检查当前安装目录，补齐运行依赖。')
+_KEPT = ('; the models and videos in the current folder are not deleted.', '；原文件夹里的模型和作品不会被删除。')
+_EXTRACT = ('Extract the downloaded package again into a new folder and start FreeVideo from there' + _KEPT[0],
+            '请把下载的整合包重新解压到一个新文件夹，再从新文件夹启动 FreeVideo' + _KEPT[1])
+_IMPORT = ('On the Installation page in the sidebar, select Install ComfyUI, change Install location to a new folder, '
+           'then click Replace package… under Import environment package and choose the downloaded environment package; '
+           'if you are online, you can instead choose Automatic as the install method there. '
+           'The models and videos in the current folder are not deleted.',
+           '请在左侧“安装”页选择“帮我安装 ComfyUI”，把“安装位置”改为一个新文件夹，然后在“导入运行环境包”中点击“更换环境包…”'
+           '并选择下载的运行环境包；能联网时，也可以在那里把安装方式改为“自动安装”。原文件夹里的模型和作品不会被删除。')
 WITHOUT_REPAIR = {
-    'dependencies': ('Return to Installation and check the same folder to restore missing dependencies.',
-                     '返回安装设置，检查当前安装目录，补齐运行依赖。'),
-    'runtime-libraries': ('Once the current task ends, open Settings › Environment and click Repair. FreeVideo installs a fresh copy of PyTorch.',
-                          '当前任务结束后，请在“设置 → 环境”里点击“修复”，FreeVideo 会重新安装一份完整的 PyTorch。'),
+    # A model file that differs from the tested one; FreeVideo leaves it in place.
+    'model-mismatch': dict(
+        busy=_model_unchanged(MODEL_BUSY),
+        bundled=_model_unchanged(('The portable package cannot switch back in one step. ' + _EXTRACT[0],
+                                  '整合包版不能一键换回。' + _EXTRACT[1])),
+        offline=_model_unchanged(MODEL_OFFLINE),
+        none=MODEL_FIRST_INSTALL),
+    # Confirmed, then something changed: setup stops (offline installations never get here).
+    **{kind: dict(busy=_joined(CHANGED_WHY[why], CHANGED_WAYS['busy']),
+                  **dict.fromkeys(('bundled', 'offline', 'none'), _joined(CHANGED_WHY[why], CHANGED_WAYS['none'])))
+       for kind, why in (('plan-changed-files', 'files'), ('plan-changed', 'other'))},
+    'dependencies': dict(
+        busy=('When the current task ends, a Repair button appears here; it checks this installation and restores what is missing.',
+              '当前任务结束后，这里会出现“修复”按钮，点击后 FreeVideo 将检查这份安装并补装缺失的组件。'),
+        bundled=('The portable package is missing components it needs and cannot restore them in one step. ' + _EXTRACT[0],
+                 '整合包缺少运行所需的组件，不能一键补齐。' + _EXTRACT[1]),
+        offline=('An imported offline environment is missing components it needs and cannot restore them in one step. ' + _IMPORT[0],
+                 '离线导入的运行环境缺少运行所需的组件，不能一键补齐。' + _IMPORT[1]),
+        none=WITHOUT_REPAIR_NONE),
+    'runtime-libraries': dict(
+        busy=('When the current task ends, a Repair button appears here; it reinstalls a complete copy of PyTorch and keeps your models and videos.',
+              '当前任务结束后，这里会出现“修复”按钮，点击后 FreeVideo 将重新安装完整的 PyTorch，模型和视频都会保留。'),
+        bundled=('The portable package cannot be repaired in one step. ' + _EXTRACT[0],
+                 '整合包版不能一键修复。' + _EXTRACT[1]),
+        offline=('An imported offline environment cannot be repaired in one step. ' + _IMPORT[0],
+                 '离线导入的运行环境不能一键修复。' + _IMPORT[1]),
+        none=WITHOUT_REPAIR_NONE),
+    # An engine update moved the editable install back after a failure (engine_binding).
+    # Offline and portable installations never reach it; their lines only say where things stand.
+    'update-unfinished': dict(
+        busy=('FreeVideo is back on the previous version and works as before. When the current task ends, a Repair button appears here; '
+              'clicking it reinstalls the engine environment and updates again. The details give the reason.',
+              'FreeVideo 已退回原来的版本，可以照常使用。当前任务结束后，这里会出现“修复”按钮；点击后会重新安装引擎环境并再次更新。原因写在详情里。'),
+        **dict.fromkeys(('bundled', 'offline'), (
+            'FreeVideo is back on the previous version and works as before; the details give the reason.',
+            'FreeVideo 已退回原来的版本，可以照常使用；原因写在详情里。')),
+        none=('FreeVideo is back on the previous version and works as before. To update again, open Installation in the sidebar, keep the same folder, '
+              'click Continue and then Check & continue, and finally click Install & launch on the confirmation page; the details give the reason.',
+              'FreeVideo 已退回原来的版本，可以照常使用。要再次更新，请在左栏的“安装”页保持同一个安装目录，依次点击“继续”和“检查并继续”，最后在确认页点击“安装并启动”；原因写在详情里。')),
 }
 
 
@@ -111,6 +171,11 @@ DEPENDENCIES = (('The environment needs repair', '运行环境需要修复'),
                 ('Click Repair to check this installation and restore what is missing.',
                  '请点击“修复”，FreeVideo 将检查这份安装并补装缺失的组件。'))
 
+# Added by the launcher when ComfyUI exits during startup and the environment it
+# made has packages whose recorded files are missing or have another size. A
+# missing file often surfaces as some other package's ImportError instead.
+ENVIRONMENT_FILES = 'Files are missing or changed in these ComfyUI environment packages: '
+
 
 def _stopped_on_missing_module(text):
     """ComfyUI itself stopped on an import, not a custom node that logged one and loaded on."""
@@ -121,18 +186,51 @@ def _stopped_on_missing_module(text):
         and not any('for custom nodes' in line for line in lines[errors[-1] + 1:])
 
 
-def launcher_failure(value, *, zh=False, other_disk=False, disk_name='', can_repair=False, repairs_comfy=False):
+def launcher_failure(value, *, zh=False, other_disk=False, disk_name='', can_repair=False, repairs_comfy=False,
+                     unavailable='none'):
     """Short guidance for known failures; callers retain the full error separately.
 
     other_disk: the launcher can offer another disk with enough room (macOS).
     disk_name: the disconnected disk the launcher found; the error's paths are redacted.
     can_repair: the launcher's Repair button can fix this installation.
     repairs_comfy: ComfyUI runs in the environment the launcher made, which Repair reinstalls.
+    unavailable: why Repair is missing when it cannot run (a key of WITHOUT_REPAIR's rows).
     """
     if not value:
         return dict(title='', detail='', action='', kind='')
     text = str(value)
     summary = text.partition(STEP_OUTPUT)[0]
+    from .comfy_launcher_runtime import OlderLauncher
+    # Controller and offline Importer retain strings; direct callers keep the exception.
+    downgrade = re.search(r'This launcher \(([^\r\n]*?)\) is older than the installed FreeVideo '
+                          r'\(([^\r\n]*?)\); nothing was changed\.', summary)
+    if isinstance(value, OlderLauncher) or downgrade:
+        launcher, installed = ((value.launcher_label, value.installed_label)
+                               if isinstance(value, OlderLauncher) else downgrade.groups())
+        if launcher and installed:
+            detail = (f'已安装的 FreeVideo 是 {installed}，这个启动器是 {launcher}。' if zh else
+                      f'The installed FreeVideo is {installed} and this launcher is {launcher}. ')
+        else:
+            detail = ('已安装的 FreeVideo 比这个启动器新。' if zh else
+                      'The installed FreeVideo is newer than this launcher. ')
+        detail += ('为避免把 FreeVideo 换回旧版本，这次没有继续，已安装的文件均未改动。'
+                   '请从桌面快捷方式打开 FreeVideo，或下载最新的启动器。' if zh else
+                   'To avoid replacing FreeVideo with an older version, nothing was done and no installed files were changed. '
+                   'Open FreeVideo from its desktop shortcut, or download the latest launcher.')
+        return dict(title='启动器比已安装的 FreeVideo 旧' if zh else 'This launcher is older than the installed FreeVideo',
+                    detail=detail, action='', kind='older-launcher', manual=True)
+    from .model_repair import MISMATCH, MISMATCH_PATH, FAILURE_TITLE, FAILURE, CHANGED_TITLE, CHANGED_REPAIR
+    mismatches = re.findall(MISMATCH + r': ([^\r\n]+)', text)
+    if mismatches:
+        rows = WITHOUT_REPAIR['model-mismatch']
+        action = (FAILURE[zh].format(file=mismatches[-1], entry='修复' if zh else 'Repair') if can_repair else
+                  rows.get(unavailable, rows['none'])[zh].format(file=mismatches[-1]))
+        failure = dict(title=FAILURE_TITLE[zh], detail='', kind='model-mismatch', action=action)
+        if not can_repair and unavailable == 'offline':
+            # The text points at the file below it.
+            paths = re.findall(MISMATCH_PATH + r': ([^\r\n]+)', text)
+            failure['path'] = paths[-1] if paths else mismatches[-1]
+        return failure
     if disk_name and 'on a disk that is not connected' in summary:
         return dict(title='这块硬盘没有连接' if zh else 'The disk is not connected', kind='disk-missing', detail='',
                     action=('请接上“%s”后点击“重新检查”' % disk_name + ('，或者改装到其他硬盘。' if other_disk else '。') if zh else
@@ -157,7 +255,7 @@ def launcher_failure(value, *, zh=False, other_disk=False, disk_name='', can_rep
         return dict(title='磁盘空间不足' if zh else 'Not enough disk space', kind='disk', detail=detail,
                     action='重新检查' if zh else 'Check again')
     if text.startswith('ComfyUI could not start.'):
-        if can_repair and repairs_comfy and _stopped_on_missing_module(summary):
+        if can_repair and repairs_comfy and (_stopped_on_missing_module(summary) or ENVIRONMENT_FILES in summary):
             return dict(title=DEPENDENCIES[0][zh], detail='', action=DEPENDENCIES[1][zh], kind='dependencies')
         return dict(title='ComfyUI 启动失败' if zh else 'ComfyUI could not start',
                     detail='ComfyUI 进程在启动时退出。' if zh else 'The ComfyUI process exited during startup.',
@@ -176,6 +274,16 @@ def launcher_failure(value, *, zh=False, other_disk=False, disk_name='', can_rep
                     action='展开详情或导出报告，查看完整检查结果。' if zh else
                            'Open the details or export the report for the complete results.', kind='kernels')
     rules = (
+        # An engine update waits for a video being generated, whoever started this installation's ComfyUI.
+        (r'ComfyUI is running a job, so the engine update waits', 'update-busy',
+         ('A video is still generating', '还有视频正在生成'),
+         ('Click Update now again when this video has finished. The video being generated is not interrupted.',
+          '这个视频生成完成后，再点击“立即更新”。正在生成的视频不会被打断。')),
+        # Moving the engine's editable install to the new source failed and was undone (engine_binding).
+        (r'Editable install failed for|Editable verification failed for|The engine.s uv is missing', 'update-unfinished',
+         ('The update did not finish', '这次更新没有完成'),
+         ('FreeVideo is back on the previous version and works as before. Click Repair to reinstall the engine environment and update again; the details give the reason.',
+          'FreeVideo 已退回原来的版本，可以照常使用。点击“修复”会重新安装引擎环境并再次更新，原因写在详情里。')),
         (r'Git \d+\.\d+ is too old to download the pinned sources', 'git-version',
          ('Git is too old', 'Git 版本过旧'),
          ('Click Retry installation; FreeVideo then installs its own Git. On macOS, update the Command Line Tools.',
@@ -250,6 +358,10 @@ def launcher_failure(value, *, zh=False, other_disk=False, disk_name='', can_rep
           'Open FreeVideo normally and import the offline packages again; the files already there are reused.',
           'Windows 不允许当前账户读取它们，通常是因为这些文件是在“以管理员身份运行”时创建的。'
           '请正常打开 FreeVideo，重新导入一次离线包，已有的文件会直接复用。')),
+        (r'A file in the installation folder changed after the review', 'plan-changed-files', CHANGED_TITLE,
+         _joined(CHANGED_WHY['files'], CHANGED_REPAIR)),
+        (r'The installation plan changed\. Detect configuration again', 'plan-changed', CHANGED_TITLE,
+         _joined(CHANGED_WHY['other'], CHANGED_REPAIR)),
         (r'PermissionError|Access is denied|Permission denied|WinError 5\b', 'permission',
          ('This folder is not writable', '无法写入这个目录'),
          ('Choose an installation folder you can write to, then retry.', '选择有写入权限的安装目录后重试。')),
@@ -266,7 +378,7 @@ def launcher_failure(value, *, zh=False, other_disk=False, disk_name='', can_rep
     for pattern, kind, title, action in rules:
         if re.search(pattern, text, re.I):
             if kind in WITHOUT_REPAIR and not can_repair:
-                action = WITHOUT_REPAIR[kind]
+                action = WITHOUT_REPAIR[kind].get(unavailable) or WITHOUT_REPAIR[kind].get('none', WITHOUT_REPAIR_NONE)
             return dict(title=title[zh], detail='', action=action[zh], kind=kind)
     # Validation messages are already actionable. Show the cause, not a stack
     # trace or a guessed hardware diagnosis, and leave long details expandable.

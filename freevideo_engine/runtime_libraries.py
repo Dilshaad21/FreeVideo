@@ -17,6 +17,7 @@ import io
 import os
 from pathlib import Path
 import re
+import shlex
 
 # ComfyUI messages choose between this and the page's own setup (repair_hint).
 from .comfy_launcher_api import LAUNCHER_REPAIR as REINSTALL
@@ -195,6 +196,109 @@ def site_for(python):
     return site_packages(python.parent.parent)
 
 
+def normalize_name(name):
+    return re.sub(r'[-_.]+', '-', name).lower()
+
+
+def _requirement_rows(requirements):
+    pending, seen, rows = [Path(requirements)], set(), []
+    while pending:
+        try:
+            path = pending.pop().resolve()
+            if path in seen:
+                continue
+            seen.add(path)
+            lines = path.read_text(encoding='utf-8-sig').splitlines()
+        except (OSError, UnicodeError, RuntimeError):
+            return None
+        continued = ''
+        for line in lines:
+            if line.lstrip().startswith('#'):
+                continue
+            continued += line
+            if continued.endswith('\\'):
+                continued = continued[:-1]
+                continue
+            row = re.split(r'\s+#', continued, maxsplit=1)[0].strip()
+            continued = ''
+            if not row:
+                continue
+            if row.startswith('-e') or re.match(r'^--editable(?:\s|=|$)', row):
+                return None
+            if row.startswith('-r') or re.match(r'^--requirement(?:\s|=|$)', row):
+                value = re.sub(r'^(?:-r\s*|--requirement(?:\s+|=)?)', '', row)
+                try:
+                    paths = shlex.split(value, posix=False)
+                except ValueError:
+                    return None
+                if len(paths) != 1 or '://' in paths[0]:
+                    return None
+                pending.append(path.parent / paths[0].strip('\'"'))
+            elif not row.startswith('-'):
+                if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', row):
+                    try:
+                        if (path.parent / row).exists():
+                            return None
+                    except OSError:
+                        return None
+                rows.append(row)
+        if continued:
+            return None
+    return rows
+
+
+def dependency_closure(python, requirements, additional=()):
+    """Required names from a requirements file and installed metadata, or None if uncertain."""
+    rows = _requirement_rows(requirements)
+    if rows is None:
+        return None
+    try:
+        from packaging.requirements import Requirement
+    except ImportError:
+        Requirement = None
+    dependencies = {}
+    site = site_for(python)
+    if site is not None:
+        for distribution in importlib.metadata.distributions(path=[str(site)]):
+            try:
+                name = distribution.metadata['Name']
+                if name:
+                    dependencies.setdefault(normalize_name(name), []).extend(distribution.requires or [])
+            except (OSError, ValueError, UnicodeDecodeError, KeyError):
+                continue
+    pending = [(row, {''}) for row in [*rows, *additional]]
+    seen = {}
+    while pending:
+        row, parent_extras = pending.pop()
+        row = re.split(r'\s+#', row, maxsplit=1)[0].strip()
+        if re.fullmatch(r'[A-Za-z0-9._-]+\.(?:whl|zip|tar(?:\.(?:gz|bz2|xz))?)(?:\[[^]]+\])?(?:\s*;.*)?', row, re.I):
+            return None
+        extras = {''}
+        if Requirement is not None:
+            try:
+                requirement = Requirement(row)
+                if requirement.marker and not any(requirement.marker.evaluate({'extra': extra})
+                                                  for extra in parent_extras):
+                    continue
+                name = normalize_name(requirement.name)
+                extras.update(requirement.extras)
+            except ValueError:
+                return None
+        else:
+            match = re.fullmatch(r'([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s*\[([A-Za-z0-9._,\s-]+)\])?'
+                                 r'\s*(?:[<>=!~].*|@\s*\S+)?\s*(?:;.*)?', row)
+            if not match:
+                return None
+            name = normalize_name(match[1])
+            extras.update(value.strip() for value in (match[2] or '').split(','))
+        previous = seen.setdefault(name, set())
+        if extras <= previous:
+            continue
+        previous.update(extras)
+        pending.extend((row, set(previous)) for row in dependencies.get(name, []))
+    return set(seen)
+
+
 def damaged(python):
     """Distributions whose recorded cuDNN files differ in this Python's environment.
 
@@ -208,6 +312,47 @@ def damaged(python):
     except Exception:
         return []
     return sorted({owner for row in found['changed'] for owner in row['owners']})
+
+
+def incomplete(python):
+    """Distributions with missing or wrong-sized RECORD files, without hashing.
+
+    Only files inside this environment with a recorded size are checked.
+    Unreadable records and checks that cannot run must never stop a setup.
+    """
+    try:
+        site = site_for(python)
+        if site is None:
+            return []
+        parent = Path(python).parent
+        root = _canonical(parent.parent if parent.name.lower() in ('bin', 'scripts') else parent)
+        found = set()
+        for distribution in importlib.metadata.distributions(path=[str(site)]):
+            try:
+                rows = list(csv.reader(io.StringIO(distribution.read_text('RECORD') or '')))
+                name = distribution.metadata['Name']
+            except (OSError, csv.Error, UnicodeDecodeError, KeyError):
+                continue
+            if not name:
+                continue
+            for row in rows:
+                if len(row) < 3 or not row[2].isdigit():
+                    continue
+                path = _canonical(os.path.join(str(site), row[0]))
+                if not path.startswith(root + os.sep):
+                    continue
+                try:
+                    size = os.path.getsize(path)
+                except (FileNotFoundError, NotADirectoryError):
+                    size = None
+                except OSError:
+                    continue
+                if size != int(row[2]):
+                    found.add(name)
+                    break
+        return sorted(found)
+    except Exception:
+        return []
 
 
 def installed_bytes(python, name):

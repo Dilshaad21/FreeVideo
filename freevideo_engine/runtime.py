@@ -56,11 +56,16 @@ class Engine:
                  window_batch=1, linear_compute='native-fp8', input_cache_dir=None,
                  fp8_gemm='auto', window_varlen=False, varlen_smooth_k=True,
                  task='t2va', stream_weights=False, canvas=None, head_parallelism=1,
-                 residual_offload=False, device_backend=None, gpu_allocation_bytes=None):
+                 residual_offload=False, device_backend=None, gpu_allocation_bytes=None,
+                 fetch_tables=True):
         self.device_backend = device_backend if device_backend is not None else get_backend()
         if gpu_allocation_bytes is not None and (type(gpu_allocation_bytes) is not int or gpu_allocation_bytes < 0):
             raise ValueError('GPU allocation limit must be a nonnegative byte count')
         self.gpu_allocation_bytes = gpu_allocation_bytes
+        # Compiling ahead of a request never fetches a sampling table: the
+        # directories of tables it compiled with zeros (adaln.TableCache).
+        self.fetch_tables = fetch_tables
+        self.table_placeholders = set()
         if self.device_backend.capabilities.name != 'cuda':
             raise NotImplementedError('Engine model execution currently requires the CUDA backend')
         from .media_request import TASKS
@@ -117,6 +122,7 @@ class Engine:
         self.stream_refiner_count = 0
         self.cache_refined_text = cache_refined_text
         self.refiner_released = False
+        self.previous_refined_text = None
         started = time.perf_counter()
         manifest = json.loads((self.cache / 'manifest.json').read_text(encoding='utf-8'))
         online_lora = manifest.get('online_lora', {})
@@ -266,7 +272,8 @@ class Engine:
         if adaln_cache:
             self.cursor = ScheduleCursor(schedule_timesteps(steps, task=task))
         table_cache = (TableCache(self.cache, manifest['source_id'], steps, task=task, manifest=manifest,
-                                 timesteps=self.cursor.timesteps, channels=model.config.hidden_size, device='cpu')
+                                 timesteps=self.cursor.timesteps, channels=model.config.hidden_size, device='cpu',
+                                 fetch=fetch_tables)
                        if adaln_cache and (adaln_disk_cache or portable_adaln) else None)
         table_cache_hits = 0
         adaln_prepare_seconds = 0.
@@ -452,6 +459,8 @@ class Engine:
                                'host_preload_seconds': self.host_preload_seconds,
                                'remaining_load_seconds': self.load_seconds - adaln_prepare_seconds - pin_seconds - self.host_preload_seconds,
                                'scope': 'Host wall time within model load; AdaLN includes table reads or computation and writes.'}
+        if table_cache is not None and table_cache.placeholders:
+            self.table_placeholders.add(table_cache.root.name)
         fa4_module = sys.modules.get('flash_attn.cute.flash_fwd')
         fa4_path = Path(fa4_module.__file__).resolve() if fa4_module is not None else None
         self.config = {'device_backend': self.device_backend.capabilities.name, 'task': task, 'attention': attention, 'prefetch': prefetch, 'adaln_cache': adaln_cache,
@@ -747,7 +756,20 @@ class Engine:
         from .fp8 import input_dtype
         started = time.perf_counter()
         refiner = self.transformer.token_refiner.refiner_blocks
-        cache, cache_key, note = None, None, None
+        cpu = prompt.detach().to('cpu').contiguous()
+        cache_key = str(cpu.dtype) + str(list(cpu.shape)) + hashlib.sha256(cpu.view(torch.uint8).numpy().tobytes()).hexdigest()
+        del cpu
+        # Pass-local tiling (pass_configuration) rewires only the video blocks
+        # and this engine's weights are fixed, so the second pass of a request
+        # reuses the first pass's tensor instead of reloading the refiner
+        # weights to compute the same values again.
+        memo = (cache_key, tuple(self.config.get(k) for k in ('attention', 'linear_compute', 'fp8_gemm', 'inference_kernels')))
+        if self.previous_refined_text is not None and self.previous_refined_text[0] == memo:
+            text = self.previous_refined_text[1].to(self.device_backend.device)
+            self.transformer._freevideo_refined_text = text
+            return dict(seconds=time.perf_counter() - started, shape=list(text.shape), cache_hit=False,
+                        previous_pass=True, refiner_weights_released=self.refiner_released)
+        cache, note = None, None
         if self.input_cache_dir:
             from .input_cache import InputCache, digest
             from .storage import fingerprint
@@ -758,9 +780,6 @@ class Engine:
                     arithmetic={k: self.config[k] for k in ('attention', 'linear_compute', 'fp8_gemm', 'inference_kernels', 'head_chunk', 'projection_chunk')},
                     **self.device_backend.arithmetic_identity())
                 cache = InputCache(identity, root=self.input_cache_dir, kind='refined-text')
-                cpu = prompt.detach().to('cpu').contiguous()
-                cache_key = str(cpu.dtype) + str(list(cpu.shape)) + hashlib.sha256(cpu.view(torch.uint8).numpy().tobytes()).hexdigest()
-                del cpu
                 found = cache.lookup(cache_key)
                 if found:
                     path, entry = found
@@ -772,6 +791,7 @@ class Engine:
                             refiner.to('meta')
                         self.refiner_released = True
                         self.transformer._freevideo_refined_text = text
+                        self.previous_refined_text = (memo, text.detach().cpu())
                         return dict(seconds=time.perf_counter() - started, shape=list(text.shape), cache_hit=True,
                                     refiner_weights_released=True, cache_receipt=str(cache.receipt(cache_key)))
                     del text
@@ -802,13 +822,14 @@ class Engine:
             refiner.to('meta')
         self.refiner_released = True
         self.transformer._freevideo_refined_text = text
+        self.previous_refined_text = (memo, text.detach().cpu())
         saved = False
-        if cache is not None and cache_key:
+        if cache is not None:
             try:
                 import uuid
                 cache.root.mkdir(parents=True, exist_ok=True)
                 temporary = cache.root / ('refined-' + uuid.uuid4().hex + '.partial')
-                torch.save(text.detach().cpu(), temporary)
+                torch.save(self.previous_refined_text[1], temporary)
                 saved = cache.put(cache_key, temporary, dict(success=True, shape=list(text.shape), dtype=str(text.dtype)), move=True)
                 note = cache.note or note
             except (OSError, ValueError) as error:
@@ -825,6 +846,7 @@ class Engine:
         if self.schedule_hook is not None:
             self.schedule_hook.remove()
         self.transformer = None
+        self.previous_refined_text = None
         self.offload_layers = []
         if self.stream_weight_source is not None:
             self.stream_weight_source.release_host_views()

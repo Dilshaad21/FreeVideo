@@ -182,6 +182,28 @@ export function thermalText(thermal, t) {
         `生成这段视频时，显卡大部分时间因过热降频${detail ? `（${detail}）` : ''}，所以比平时慢很多。请改善散热；笔记本请接通电源并选择高性能模式。`);
 }
 
+export function encoderFilePath(file) {
+    return file?.offline_installation === true && typeof file.path === 'string' ? file.path : '';
+}
+
+export function encoderFileText(file, t) {
+    const [actual, expected] = file.sizes;
+    let message = t(`This run used a ${actual} GiB text encoder file, not the ${expected} GiB file with the same name that FreeVideo tests. Results and speed are not guaranteed to match the tested version.`,
+        `这次使用的文本编码器文件（${actual} GiB）不是 FreeVideo 测试过的同名文件（${expected} GiB）。生成结果和速度都不保证与测试过的版本一致。`);
+    if (file.offline_installation === true) {
+        const target = encoderFilePath(file) ? t('the file below', '下面这个文件') : t('this file', '这个文件');
+        message += t(
+            ` This offline-package installation cannot switch back in one step yet. Close FreeVideo, move or rename ${target}, then import the Text encoder package again on the Installation page of the launcher.`,
+            `离线包安装暂时不能一键换回。请先关闭 FreeVideo，把${target}移走或改名，再在启动器的“安装”页重新导入“文本编码器”包。`);
+    } else if (file.launcher === true) message += t(
+        ' In the FreeVideo launcher, open Settings › Environment and click Repair to switch back to the tested file; the current file is kept under a new name.',
+        '在 FreeVideo 启动器的“设置 → 环境”中点击“修复”，可以换回测试过的文件，原文件会改名保留。');
+    else message += t(
+        " Click Install / repair in FreeVideo's settings on this page (or, if you installed with setup.sh, run ./setup.sh again); after you confirm, the tested file is restored and the current file is kept under a new name.",
+        '请在页面的 FreeVideo 设置中点击“安装／修复”（用 setup.sh 安装的，也可以重新运行 ./setup.sh）；确认后会换回测试过的文件，原文件改名保留。');
+    return message;
+}
+
 export function referenceTrimText(row, t) {
     const kind = row?.kind === 'audio' ? t('Reference audio', '参考音频') : t('Reference video', '参考视频');
     const name = Number.isInteger(row?.number) ? `${kind} ${row.number}` : kind;

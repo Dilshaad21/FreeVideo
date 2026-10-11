@@ -428,6 +428,10 @@ class LogProgress:
                 update(done=event['blocks'], total=50, detail='Load cached blocks and upload resident weights')
                 if event['blocks'] == 50:
                     update(done=0, total=0, detail='Finish model placement')
+            elif kind == 'model_retained':
+                from .model_repair import PROGRESS
+                update(done=0, total=0, detail=PROGRESS[0] + Path(event['file']).name + ' → ' + event['keep_as'],
+                       scope='model-repair', unit='items')
             elif kind == 'model_ready':
                 if event.get('operation') == 'verify':
                     continue  # Local verification cannot reset download ETA.

@@ -1,5 +1,6 @@
 // ComfyUI owns execution. This controller only submits frozen workflows and
 // replenishes a loop after its previous request has actually completed.
+import {fetchQueueRead, detectBrowserExtension} from './browser_extension.js';
 const clone = value => structuredClone(value);
 
 // Repeat the completed request, not an editor draft changed while it was running.
@@ -9,9 +10,12 @@ export async function regenerateResult(api, nodeId, result, currentPrompt) {
     const path = result.request_id ? '/history/' + encodeURIComponent(result.request_id) : '/history?max_items=64';
     let rows = [];
     try {
-        const response = await api.fetchApi(path);
+        const response = await fetchQueueRead(api, path);
         if (response.ok) rows = Object.values(await response.json());
-    } catch { /* Cleared/unavailable history is an ordinary new generation. */ }
+    } catch (error) {
+        if (detectBrowserExtension(error)) throw error;
+        /* Cleared/unavailable history is an ordinary new generation. */
+    }
     rows.sort((a, b) => (b.prompt?.[0] || 0) - (a.prompt?.[0] || 0));
     const saved = rows.find(row => row.outputs?.[nodeId]?.freevideo_summary?.[0]?.video === result.video
         && row.outputs[nodeId].freevideo_summary[0].result_cache_hit === true
@@ -35,9 +39,12 @@ export async function upscaleResult(api, nodeId, result, currentPrompt) {
     const path = result.request_id ? '/history/' + encodeURIComponent(result.request_id) : '/history?max_items=64';
     let rows = [];
     try {
-        const response = await api.fetchApi(path);
+        const response = await fetchQueueRead(api, path);
         if (response.ok) rows = Object.values(await response.json());
-    } catch { /* Cleared/unavailable history: the bridge still uses the preview's request. */ }
+    } catch (error) {
+        if (detectBrowserExtension(error)) throw error;
+        /* Cleared/unavailable history: the bridge still uses the preview's request. */
+    }
     rows.sort((a, b) => (b.prompt?.[0] || 0) - (a.prompt?.[0] || 0));
     const saved = rows.find(row => row.outputs?.[nodeId]?.freevideo_summary?.[0]?.video === result.video
         && row.status?.status_str === 'success' && row.status?.completed
@@ -124,7 +131,7 @@ export function createStudioQueue(api, nodeId, {random = randomSeed, pollMs = 20
             session.waiting = reply.prompt_id;
             // Stop may be clicked while the server is acknowledging submission.
             if (!session.active) {
-                const response = await api.fetchApi('/queue');
+                const response = await fetchQueueRead(api, '/queue');
                 if (response.ok && (await response.json()).queue_pending?.some(row => row[1] === reply.prompt_id)) await cancel(reply.prompt_id);
             }
         }
@@ -135,7 +142,7 @@ export function createStudioQueue(api, nodeId, {random = randomSeed, pollMs = 20
         const session = loop;
         if (!session?.active || session.sending || !session.waiting) return;
         if (running?.id === session.waiting || pending.some(row => row.id === session.waiting)) return;
-        const response = await api.fetchApi('/history/' + encodeURIComponent(session.waiting));
+        const response = await fetchQueueRead(api, '/history/' + encodeURIComponent(session.waiting));
         if (!response.ok) throw new Error('queue_unavailable');
         const history = (await response.json())[session.waiting];
         if (loop !== session || !session.active) return;
@@ -150,7 +157,7 @@ export function createStudioQueue(api, nodeId, {random = randomSeed, pollMs = 20
         finally { session.sending = false; }
     }
     async function readQueue() {
-        const response = await api.fetchApi('/queue');
+        const response = await fetchQueueRead(api, '/queue');
         if (!response.ok) throw new Error('queue_unavailable');
         const queue = await response.json();
         running = (queue.queue_running || []).filter(matches).map(entry)[0] || null;

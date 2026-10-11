@@ -118,6 +118,7 @@ WINDOWS_SMALL_HEAD8_FRAMES = 243
 # head 8 with none (8.43 s, 4.18 GiB).
 WINDOWS_INT8_HEAD8_TOKENS = 72576
 WINDOWS_INT8_HEAD8_EXTRA = int(1.15 * GiB)
+WINDOWS_INT8_HEAD8_AMPERE_EXTRA = int(.3 * GiB)
 # Below that band an 8 GiB card stages the residual stream, and the staged
 # pass kept four heads. With the Windows allocator (no expandable segments)
 # capped at an 8 GiB laptop's 6.65 GiB budget, 1344x768x243 staged with its
@@ -131,7 +132,16 @@ WINDOWS_INT8_HEAD8_EXTRA = int(1.15 * GiB)
 # eight heads against 81.8 with four, at 5.95 GB reserved. Eight heads are
 # charged the same extra over the Windows staged measurement and its margin,
 # not over the lower FP8-derived estimate, which leaves about 0.5 GiB over
-# both peaks. Ampere has no Windows measurement with eight heads and keeps four.
+# both peaks. Native Windows RTX 3090, held to an RTX 3070's 7.132 GB
+# budget, 1344x768x243 with one image reference (552 rows), both passes staged:
+#
+#   head 4    68.80/68.98 s/step   4.95 GB reserved
+#   head 8    65.22                6.25 GB (5.82 GiB)
+#
+# The first pass with eight heads reserved 2.75 GB. All four runs had no
+# allocator retry, OOM or sample over the local budget. Ampere's second-pass
+# peak is about 0.28 GiB above the RTX 5060 Ti's 5.95 GB (5.54 GiB), so charge
+# another 0.3 GiB at 72576 rows, scaled by rows, to keep the same margin.
 WINDOWS_INT8_STAGED_HEAD8_TOKENS = 72576 + 4 * 1008
 # Keeping the attention outputs on the GPU instead of in host memory costs this
 # much extra peak. See benchmarks/2026-09-15-consumer-capacity-grid.json. Measured at four corners of the band that uses the host
@@ -974,7 +984,6 @@ def choose(hardware: Hardware, *, vram_gib=None, ram_gib=None, attention='auto',
                              and canvas['frames'] <= WINDOWS_SMALL_HEAD8_FRAMES
                              and WINDOWS_SMALL_HEAD8_TOKENS < effective_tokens <= WINDOWS_INT8_HEAD8_TOKENS)
         windows_int8_staged_head8 = (desktop and int8 and not lora and legs == ['sage2', 'sage2']
-                                     and hardware.architecture != 'ampere'
                                      and effective_tokens is not None
                                      and canvas['frames'] <= WINDOWS_SMALL_HEAD8_FRAMES
                                      and effective_tokens <= WINDOWS_INT8_STAGED_HEAD8_TOKENS)
@@ -1138,6 +1147,8 @@ def choose(hardware: Hardware, *, vram_gib=None, ram_gib=None, attention='auto',
                     # heads there measured eight times slower.
                     wider = (max(reserve, int8_gpu_output_need(effective_tokens, windows=True))
                              + int(WINDOWS_INT8_HEAD8_EXTRA * effective_tokens / WINDOWS_INT8_HEAD8_TOKENS))
+                    if hardware.architecture == 'ampere':
+                        wider += int(WINDOWS_INT8_HEAD8_AMPERE_EXTRA * effective_tokens / WINDOWS_INT8_HEAD8_TOKENS)
                     if gpu_budget >= wider:
                         head, reserve = 8, wider
         else:
@@ -1399,9 +1410,9 @@ def choose(hardware: Hardware, *, vram_gib=None, ram_gib=None, attention='auto',
                      (canvas['width'], canvas['height'], canvas['frames'], canvas['video_tokens'], geometry_adjustment / GiB))
     if desktop and small and head == 8:
         notes.append('Use eight-head groups for this small Windows canvas (%d generated and reference rows). '
-                     'Its larger workspace allowance and GPU attention outputs fit inside the current budget; '
-                     'weight residency pays for the wider group. Each pass is planned at its own total token count. '
-                     'Measured speed benefit is from PRO 6000 Linux; native Windows throughput remains unmeasured.'
+                     'Its larger workspace allowance and GPU attention outputs fit inside the current budget. '
+                     'Each pass is planned at its own total token count. '
+                     'Eight heads measured faster on native Windows as well as on Linux.'
                      % effective_tokens)
     if capacity_trial:
         notes.append('The %.2f GiB live budget is below the %.2f GiB working-set estimate. '

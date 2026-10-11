@@ -28,6 +28,40 @@ export class PromptVersions {
     select(name) { if (name === 'original' || this.value.rewritten) { this.value.selected = name; this.value.useOriginal = name === 'original'; } }
 }
 
+// Best-effort imports have no UI state and never hold up enhancement or video.
+export function promptPrestart(api, nodeId, enabled, alive = () => true) {
+    let pending = null, completed = false;
+    // Enhancement can be turned off, or the panel closed, while the token is fetched.
+    const ready = () => alive() && enabled();
+    function request() {
+        if (!ready()) return Promise.resolve();
+        if (pending) return pending;
+        pending = (async () => {
+            const reply = await api.fetchApi('/freevideo/prompt-vlm');
+            if (!reply.ok || !ready()) return;
+            const info = await reply.json();
+            if (!ready()) return;
+            await api.fetchApi('/freevideo/prompt-vlm/prestart', {method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-FreeVideo-Prompt': info.token}, body: '{}'});
+        })().catch(() => {}).finally(() => { pending = null; });
+        return pending;
+    }
+    const onExecuted = event => { if (String(event.detail?.node) === String(nodeId)) completed = true; };
+    const onStatus = event => {
+        const remaining = (event.detail?.status || event.detail)?.exec_info?.queue_remaining;
+        if (completed && remaining === 0) {
+            completed = false;
+            if (enabled()) void request();
+        }
+    };
+    api.addEventListener('executed', onExecuted);
+    api.addEventListener('status', onStatus);
+    return {request, dispose() {
+        api.removeEventListener('executed', onExecuted);
+        api.removeEventListener('status', onStatus);
+    }};
+}
+
 // An empty box is never rewritten, the untouched starter prompt included:
 // enhancement waits for the user's own scene.
 export function createPromptEnhancer({node, input, editor, api, context, setText, t, starter = '', onReport = () => {}, onChange = () => {}}) {
@@ -74,6 +108,10 @@ export function createPromptEnhancer({node, input, editor, api, context, setText
     install.append(detail, actions);
     bar.append(label, tabs, redo, cancel); element.append(bar, editor || input, status, install);
     let disposed = false, token = '', job = '', running = null, consent = null, cancelling = false, waiting = false, replacing = false;
+    const prestart = promptPrestart(api, node.id, () => versions.value.enabled, () => !disposed && !input.disabled);
+    const onFocus = () => { if (versions.value.enabled) void prestart.request(); };
+    input.addEventListener('focus', onFocus);
+    if (versions.value.enabled) void prestart.request();
     // Available RAM the model needs; the server knows the usual case for this card.
     let ramBytes = 11 * 2 ** 30;
     const gib = value => String(Math.round(value / 2 ** 30));
@@ -215,7 +253,7 @@ export function createPromptEnhancer({node, input, editor, api, context, setText
     toggle.onchange = () => {
         versions.value.enabled = toggle.checked;
         if (!toggle.checked) { cancelJob().catch(() => {}); versions.select('original'); apply(); }
-        else { versions.value.useOriginal = false; save(); render(); enhance().catch(() => {}); }
+        else { void prestart.request(); versions.value.useOriginal = false; save(); render(); enhance().catch(() => {}); }
     };
     redo.onclick = () => enhance().catch(() => {});
     show(''); save(false); render();
@@ -229,7 +267,8 @@ export function createPromptEnhancer({node, input, editor, api, context, setText
         try { if (!versions.fresh(context())) await enhance(); }
         catch (error) { show(errorText(error), error?.message === 'cancelled' ? '' : 'error'); return false; }
     }, sync() { if (input.value !== versions.text()) changed(); }, dispose() {
-        disposed = true; cancelJob().catch(() => {}); input.removeEventListener('input', changed);
+        disposed = true; prestart.dispose(); cancelJob().catch(() => {}); input.removeEventListener('input', changed);
         input.removeEventListener('beforeinput', replace);
+        input.removeEventListener('focus', onFocus);
     }};
 }

@@ -6,6 +6,93 @@ import sys
 import time
 import traceback
 
+PRESTART_ENV = 'FREEVIDEO_PROMPT_PRESTART_WORKER'
+PRESTART_TIMEOUT_ENV = 'FREEVIDEO_PROMPT_PRESTART_TIMEOUT_SECONDS'
+
+
+def process_memory(pid=None):
+    """Import footprint only; Windows residency and commit are distinct."""
+    import psutil
+    pid = os.getpid() if pid is None else pid
+    if os.name == 'nt':
+        from ..win32 import process_memory as counters
+        row = counters(pid)
+        return dict(rss_bytes=row['rss_bytes'], private_bytes=row['private_commit_bytes'],
+                    private_working_set_bytes=row['private_working_set_bytes'],
+                    private_commit_bytes=row['private_commit_bytes'], metric='windows_private')
+    process = psutil.Process(pid)
+    rss = process.memory_info().rss
+    try:
+        private = process.memory_full_info().uss
+        metric = 'uss'
+    except (psutil.Error, OSError, AttributeError):
+        private, metric = rss, 'rss_fallback'
+    return dict(rss_bytes=rss, private_bytes=private, metric=metric)
+
+
+def request_memory(stats):
+    """Credit this waiting worker, rather than its stale launch-time headroom."""
+    import psutil
+    own = process_memory()
+    physical = psutil.virtual_memory().available
+    stats.update(request_memory_metric=own['metric'], request_memory_physical_available_bytes=physical,
+                 request_memory_rss_bytes=own['rss_bytes'], request_memory_private_bytes=own['private_bytes'])
+    if os.name == 'nt':
+        from ..win32 import memory_status
+        commit = memory_status()['commit_available_bytes']
+        physical_credit = physical + own['private_working_set_bytes']
+        commit_credit = commit + own['private_commit_bytes']
+        stats.update(request_memory_commit_available_bytes=commit,
+                     request_memory_private_working_set_bytes=own['private_working_set_bytes'],
+                     request_memory_private_commit_bytes=own['private_commit_bytes'],
+                     request_memory_physical_with_worker_bytes=physical_credit,
+                     request_memory_commit_with_worker_bytes=commit_credit)
+        available = min(physical_credit, commit_credit)
+    else:
+        available = physical + own['private_bytes']
+    stats['request_memory_with_worker_bytes'] = available
+    return available
+
+
+def import_dependencies():
+    # Resolve lazy Transformers classes here, without loading config or weights.
+    os.environ.update(HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', HF_HUB_DISABLE_TELEMETRY='1')
+    import torch
+    import transformers
+    from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+    return torch, transformers
+
+
+def wait_request(timeout):
+    """A pipe read in a daemon thread works on Windows as well as POSIX.
+
+    On timeout the process exits, dropping the blocked reader and its pipe.
+    EOF with no request is an ordinary idle exit.
+    """
+    import queue
+    import threading
+    received = queue.Queue()
+    def read():
+        try:
+            chunks, remaining = [], 1024 * 1024
+            while remaining:
+                chunk = os.read(sys.stdin.fileno(), min(65536, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            received.put(b''.join(chunks))
+        except Exception as error:
+            received.put(error)
+    threading.Thread(target=read, daemon=True).start()
+    try:
+        value = received.get(timeout=timeout)
+    except queue.Empty:
+        return None
+    if isinstance(value, Exception):
+        raise value
+    return value or None
+
 
 def available_memory():
     import psutil
@@ -49,15 +136,16 @@ def failure(error, mode='rewrite'):
 def begin(stats):
     """Imports and the available-RAM readings shared by every mode; returns checkpoint()."""
     started = time.monotonic()
-    stats['available_memory_at_start_bytes'] = available_memory()
+    if 'available_memory_at_start_bytes' not in stats:
+        stats['available_memory_at_start_bytes'] = available_memory()
     import hashlib
     stats['code_sha256'] = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                             for name in ('core.py', 'worker.py', 'rules.py')}
     emit(phase='loading', diagnostics=dict(stats))
-    os.environ.update(HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', HF_HUB_DISABLE_TELEMETRY='1')
-    import torch
-    import transformers
-    stats.update(import_seconds=time.monotonic() - started, torch_version=torch.__version__,
+    torch, transformers = import_dependencies()
+    if 'prewarm_import_seconds' not in stats:
+        stats['import_seconds'] = time.monotonic() - started
+    stats.update(torch_version=torch.__version__,
                  transformers_version=transformers.__version__, cuda_version=torch.version.cuda,
                  platform=sys.platform, python_version=sys.version.split()[0])
     def checkpoint(stage, phase='loading', **extra):
@@ -206,6 +294,7 @@ def generate(torch, model, inputs, max_new_tokens, started, on_token):
                     now = time.monotonic()
                 self.first = now
                 timing['first_output_seconds'] = now - started
+                timing['first_output_epoch'] = time.time()
             timing.update(output_tokens=tokens, decode_seconds=now - self.first,
                           decode_tokens_per_second=(tokens - 1) / (now - self.first) if now > self.first else None)
             on_token(timing)
@@ -252,6 +341,7 @@ def rewrite(folder, value, stats):
         stats.update(output_tokens=timing['output_tokens'], decode_seconds=timing['decode_seconds'],
                      decode_tokens_per_second=timing['decode_tokens_per_second'])
         stats['time_to_first_output_seconds'] = timing['first_output_seconds']
+        stats.setdefault('first_output_epoch', timing['first_output_epoch'])
         if time.monotonic() - shown[0] > .5:
             checkpoint('decode', 'rewriting')
             shown[0] = time.monotonic()
@@ -286,11 +376,34 @@ def rewrite(folder, value, stats):
 def main():
     stats = {}
     value = {}
+    prestarting = os.environ.get(PRESTART_ENV) == '1'
+    requested = False
     try:
-        value = json.loads(sys.stdin.buffer.read(1024 * 1024))
+        if prestarting:
+            started = time.monotonic()
+            torch, _ = import_dependencies()
+            # This is the only CUDA query allowed before a request; it neither
+            # opens the driver nor initializes a context.
+            if torch.cuda.is_initialized():
+                raise RuntimeError('Prestart imports initialized CUDA')
+            imported = time.monotonic() - started
+            ready_epoch = time.time()
+            emit(phase='ready', import_seconds=imported, pid=os.getpid(), cuda_initialized=False)
+            data = wait_request(max(0., float(os.environ.get(PRESTART_TIMEOUT_ENV, '300'))))
+            if data is None:
+                return 0
+            value = json.loads(data)
+            requested = True
+            metadata = value.pop('_prewarm', {})
+            waited = max(0., ready_epoch - metadata.get('sent_epoch', ready_epoch))
+            stats.update(prewarm_import_seconds=imported, import_seconds=waited)
+            stats['available_memory_at_start_bytes'] = request_memory(stats)
+        else:
+            value = json.loads(sys.stdin.buffer.read(1024 * 1024))
         run(Path(sys.argv[1]), value, stats=stats)
     except Exception as error:
-        gpu_snapshot(stats)
+        if not prestarting or requested:
+            gpu_snapshot(stats)
         mode = value.get('mode') if isinstance(value, dict) else None
         emit(phase='failed', diagnostics=stats, **failure(error, mode))
         return 1

@@ -1,8 +1,12 @@
 """File-backed ComfyUI media bundles; no tensor or model imports."""
 import json
 import math
+import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from . import launcher_bridge
 from .monitoring import thermal_slowdown
+from .paths import data_root
+from .support_report import encoder_sizes
 
 
 def saved_video(output, output_directory):
@@ -147,6 +151,21 @@ def output_summary(report, relative_video):
                 video=relative_video.as_posix(), report=relative_video.with_suffix(
                     '.debug.json' if report.get('diagnostic_file') == relative_video.with_suffix('.debug.json').name
                     else '.request.json').as_posix())
+    checkpoint = encoding.get('checkpoint') or {}
+    sizes = checkpoint.get('bytes'), checkpoint.get('expected_bytes')
+    # Reports are read back from disk; a malformed one gets no notice rather than failing the library.
+    if checkpoint.get('tested_size') is False and all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in sizes):
+        try:
+            # Match bootstrap.offline_installation.
+            offline_installation = (data_root().parent / 'portable.json').is_file()
+        except OSError:
+            offline_installation = False
+        result['encoder_file'] = dict(bytes=checkpoint['bytes'], expected_bytes=checkpoint['expected_bytes'],
+                                      sizes=list(encoder_sizes(checkpoint['bytes'], checkpoint['expected_bytes'])),
+                                      offline_installation=offline_installation, launcher=bool(os.environ.get(launcher_bridge.ENV)))
+        if offline_installation and isinstance(encoding.get('encoder'), str):
+            result['encoder_file']['path'] = encoding['encoder']
     if report.get('preview'):
         result['preview_geometry'] = report['preview'].get('geometry')
     if report.get('device_backend') == 'mps':

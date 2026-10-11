@@ -58,7 +58,7 @@ class CachedModulation(torch.nn.Module):
 class TableCache:
     """Persist fixed modulation constants by weights, schedule and layout."""
     def __init__(self, root, source_id, steps, task='t2va', *, manifest=None,
-                 timesteps=None, channels=5376, device='cuda'):
+                 timesteps=None, channels=5376, device='cuda', fetch=True):
         from . import adaln_assets as assets
         from .monitoring import save
         times = schedule_timesteps(steps, device='cpu', task=task) if timesteps is None else timesteps
@@ -72,6 +72,8 @@ class TableCache:
         self.optional_loaded = set()
         self.optional_downloaded = set()
         self.optional_download_bytes = 0
+        self.fetch = fetch
+        self.placeholders = set()
         self.root = Path(root) / assets.directory(self.identity)
         self.producer = None
         self.shared = None
@@ -120,6 +122,10 @@ class TableCache:
                 self.producer = dict(old, migrated_from='verified-legacy-contract-v1')
                 self.asset = dict(identity=self.identity, directory=candidate.name, files=files, producer=self.producer)
                 return
+        if not fetch:
+            # Compiling ahead of a request reads the tables on disk and writes
+            # nothing; a table that is not there is not fetched (see load).
+            return
         self.root.mkdir(parents=True, exist_ok=True)
         marker = self.root / 'identity.json'
         if marker.exists():
@@ -144,6 +150,8 @@ class TableCache:
             if row is None:
                 raise ValueError('Incomplete AdaLN model asset')
         elif not path.is_file() or not marker.is_file():
+            if not self.fetch:
+                return self.placeholder(index)
             if self.optional_asset is None:
                 return None
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,6 +172,19 @@ class TableCache:
         if any(not bool(torch.isfinite(tensor).all()) for tensor in state.values()):
             raise ValueError('Nonfinite AdaLN model asset')
         return [state[f'step_{i}'].chunk(6, dim=-1) for i in range(steps)]
+
+    def placeholder(self, index):
+        """Zeros in a missing table's shape and dtype, for compiling only.
+
+        The fused block kernels compile for these shapes; no value reaches one.
+        A request installs or computes the real table before it samples.
+        """
+        if self.identity['dtype'] != 'BF16':
+            raise ValueError('Unsupported AdaLN table dtype')
+        self.placeholders.add(index)
+        width = self.identity['channels'] * self.identity['components']
+        return [torch.zeros(len(times) * self.identity['modality_rows'], width, dtype=torch.bfloat16,
+                            device=self.device).chunk(6, dim=-1) for times in self.identity['timesteps']]
 
     def save(self, index, module, *, producer_device=None):
         from . import adaln_assets as assets

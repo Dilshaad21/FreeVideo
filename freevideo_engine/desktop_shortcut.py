@@ -15,6 +15,20 @@ from .monitoring import save
 from .system import windows
 
 
+def read_build(path):
+    """A launcher stamp, or an unknown identity for legacy/unreadable copies."""
+    from .launcher_update import build_identity
+    try:
+        return build_identity(json.loads(Path(path).read_text(encoding='utf-8')))
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _newer_copy(target, current):
+    from .release_notes import older
+    return older(current or {}, read_build(Path(target).parent / 'launcher-build.json'))
+
+
 def digest(path):
     value = hashlib.sha256()
     with Path(path).open('rb') as stream:
@@ -156,7 +170,7 @@ def _complete(root, fingerprint, folder):
         return False
 
 
-def launcher_target(engine, source, portable_root=None):
+def launcher_target(engine, source, portable_root=None, *, prepare=True):
     if portable_root:
         target = Path(portable_root) / 'FreeVideo.exe'
         if not target.is_file():
@@ -165,12 +179,16 @@ def launcher_target(engine, source, portable_root=None):
     if getattr(sys, 'frozen', False):
         executable = Path(sys.executable).resolve()
         from .launcher_update import current_build
-        folder = (current_build() or {}).get('packaging') == 'onedir'
+        identity = current_build() or {}
+        folder = identity.get('packaging') == 'onedir'
         fingerprint = digest(executable)
         parent = copies_folder(engine, fingerprint)
         for root in [parent / fingerprint, *sorted(parent.glob(fingerprint + '-*'))]:
             if _complete(root, fingerprint, folder):
                 return root / 'FreeVideo.exe', [], root / 'FreeVideo.exe'
+        if not prepare:
+            target = parent / fingerprint / 'FreeVideo.exe'
+            return target, [], target
         parent.mkdir(parents=True, exist_ok=True)
         # Not tempfile.mkdtemp: since Python 3.12.4 that folder admits only its owner, so a copy
         # made while running as administrator could not be opened from the shortcut afterwards.
@@ -182,6 +200,8 @@ def launcher_target(engine, source, portable_root=None):
                 shutil.copytree(executable.parent / '_internal', stage / '_internal')
             if digest(stage / 'FreeVideo.exe') != fingerprint:
                 raise OSError('Launcher changed while preparing the desktop shortcut; retry installation')
+            if identity:
+                save(stage / 'launcher-build.json', identity)
             root = parent / fingerprint
             if os.path.lexists(root):
                 root = root.with_name(fingerprint + '-' + uuid.uuid4().hex[:8])
@@ -253,8 +273,8 @@ def _renamed(folder, entry, target):
     return None
 
 
-def _place(folder, entry, target, arguments, icon):
-    """Write or refresh FreeVideo.lnk in one folder, keeping a user's own link of that name."""
+def _link_path(folder, entry, target):
+    """Select the managed link without changing it or preparing a launcher copy."""
     path = folder / 'FreeVideo.lnk'
     old = Path(entry['path']) if entry.get('path') else None
     if old is not None and old.parent == folder and old.is_file() and _ours(old, entry, target):
@@ -264,6 +284,12 @@ def _place(folder, entry, target, arguments, icon):
         index = 2
         while path.name.startswith('FreeVideo') and path.exists() and not _ours(path, entry, target):
             path = folder / ('FreeVideo (%d).lnk' % index); index += 1
+    return path
+
+
+def _place(folder, entry, target, arguments, icon):
+    """Write or refresh FreeVideo.lnk in one folder, keeping a user's own link of that name."""
+    path = _link_path(folder, entry, target)
     if path.is_file():
         if (_same(entry.get('path'), path) and _same(entry.get('target'), target)
                 and entry.get('arguments') == arguments and entry.get('sha256') == digest(path)):
@@ -349,6 +375,10 @@ def appimage_target(engine, appimage):
         (stage / APPIMAGE_NAME).chmod(0o755)
         if digest(stage / APPIMAGE_NAME) != fingerprint:
             raise OSError('Launcher changed while preparing the desktop shortcut; retry installation')
+        from .launcher_update import current_build
+        identity = current_build()
+        if identity:
+            save(stage / 'launcher-build.json', identity)
         root = parent / fingerprint
         if os.path.lexists(root):
             root = root.with_name(fingerprint + '-' + uuid.uuid4().hex[:8])
@@ -363,6 +393,25 @@ def desktop_entry(target, icon):
     return ('[Desktop Entry]\nType=Application\nName=FreeVideo\nComment=Install and open FreeVideo in ComfyUI\n'
             'Comment[zh_CN]=安装并在 ComfyUI 中打开 FreeVideo\nExec=%s\nIcon=%s\nTerminal=false\n'
             'Categories=AudioVideo;Video;Graphics;\nStartupWMClass=FreeVideo\n' % (desktop_quote(target), icon))
+
+
+def desktop_entry_target(path):
+    """Read the executable in a FreeVideo desktop entry, including quoted paths."""
+    import re
+    import shlex
+    try:
+        for line in Path(path).read_text(encoding='utf-8', errors='replace').splitlines():
+            if line.startswith('Exec=') and 'FreeVideo' in line:
+                command = line[5:].replace('%%', '%').lstrip()
+                quoted = re.match(r'^"((?:\\.|[^"\\])*)"(?:\s|$)', command)
+                if quoted:
+                    # Desktop Entry quoting also escapes $ and ` inside double
+                    # quotes; shlex leaves those backslashes in the filename.
+                    return Path(re.sub(r'\\([\\"`$])', r'\1', quoted[1]))
+                return Path(shlex.split(command)[0])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
 
 
 def _write_entry(path, content, *, trusted=False):
@@ -394,8 +443,15 @@ def create_linux(engine):
     if image is None:
         return dict(status='not-applicable')  # Started from a checkout: ./setup.sh adds the freevideo command.
     engine = Path(engine)
-    target = appimage_target(engine, image)
     data = _xdg('XDG_DATA_HOME', Path.home() / '.local/share')
+    desktop = linux_desktop_directory()
+    from .launcher_update import current_build
+    current = current_build()
+    for path in (data / 'applications' / (APP_ID + '.desktop'), desktop / 'FreeVideo.desktop'):
+        named = desktop_entry_target(path)
+        if named is not None and _newer_copy(named, current):
+            return dict(status='present', path=str(path), target=str(named))
+    target = appimage_target(engine, image)
     icon = data / 'icons/hicolor/512x512/apps' / (APP_ID + '.png')
     source_icon = Path(__file__).parent / 'assets/icon.png'
     if not icon.is_file() or digest(icon) != digest(source_icon):
@@ -403,7 +459,6 @@ def create_linux(engine):
         shutil.copyfile(source_icon, icon)
     content = desktop_entry(target, icon)
     menu = _write_entry(data / 'applications' / (APP_ID + '.desktop'), content)
-    desktop = linux_desktop_directory()
     # A server has no desktop folder; never create one for it.
     result = (_write_entry(desktop / 'FreeVideo.desktop', content, trusted=True) if desktop.is_dir()
               else dict(status='not-applicable', path=str(desktop / 'FreeVideo.desktop')))
@@ -430,7 +485,6 @@ def create(engine, source, portable_root=None):
         return dict(status='not-applicable')
     engine = Path(engine)
     receipt = engine / 'launcher/desktop-shortcut.json'
-    target, arguments, icon = launcher_target(engine, source, portable_root)
     try:
         previous = json.loads(receipt.read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -438,6 +492,21 @@ def create(engine, source, portable_root=None):
     if not isinstance(previous, dict):
         previous = {}
     recorded = {key: value for key, value in previous.items() if key != 'start_menu'}
+    from .launcher_update import current_build
+    current = current_build()
+    if current:
+        # Check both places before copying an EXE or writing either link/receipt.
+        target, _, _ = launcher_target(engine, source, portable_root, prepare=False)
+        for directory, entry in ((start_menu_directory, previous.get('start_menu') or {}),
+                                 (desktop_directory, recorded)):
+            try:
+                path = _link_path(directory(), entry, target)
+                named = read_link_targets([path]).get(str(path))
+            except (OSError, AttributeError, ValueError):
+                continue
+            if named and _newer_copy(named, current):
+                return dict(status='present', path=str(path), target=str(named))
+    target, arguments, icon = launcher_target(engine, source, portable_root)
     # Each place on its own: a refused desktop must not cost the Start menu entry.
     try:
         menu = _place(start_menu_directory(), previous.get('start_menu') or {}, target, arguments, icon)

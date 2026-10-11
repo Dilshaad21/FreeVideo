@@ -1,41 +1,72 @@
 {
   "schema": 1,
-  "product_version": "0.3.23",
+  "product_version": "0.3.24",
   "en": {
-    "summary": "Generation and installation progress show one overall percentage with the details that matter, such as the current step and how much has been downloaded; the workspace fills the window; RTX 50 GPUs no longer keep pausing when the driver cache is full, and the first video after a start waits less.",
+    "summary": "Compiling after an update now runs in the background while FreeVideo is idle, and Windows PCs with less RAM and 8 GB RTX 30 cards generate faster; Repair handles more cases and offline installations update their engine with the launcher.",
     "changes": [
-      "The first video after FreeVideo starts waits up to about 15 seconds less for the text encoder. On RTX 40 and RTX 50 cards under Windows, and on Linux, more of the video decoder stays on the graphics card while decoding (all of it on 12 GB cards), so decoding is faster.",
-      "On Windows with RTX 50 GPUs, generation no longer keeps pausing once the graphics driver's compile cache is full.",
-      "On Windows, when the video model fits neither in GPU memory nor in RAM, generation waits less for the drive. When another program takes GPU memory during generation, decoding no longer starts over because it ran out of memory.",
-      "Generation progress shows one overall percentage, the current step and the elapsed time, with a small bar under slow stages, and the remaining time appears after the first two steps; during installation, repair and updates, a download shows what is being downloaded, how much and how fast. Loading the video model no longer hangs when the graphics driver does not answer, and after a long time without progress the page says that generation is still running and offers the report.",
-      "Error cards now say in one sentence what happened and what to do, with the raw error under Technical details; cases such as a reference video that is too short or a LoRA that cannot be used with the int8 model yet each have their own message. The compatibility setting now describes what each level does.",
-      "The creative workspace and the Creations window now fill the browser window, so the video preview grows with it. On windows at least 1680 px wide, a Recent videos column appears on the right; clicking a video plays it in the preview, and a button in the preview header hides the column.",
-      "A custom step count now downloads only a sampling table the first time, up to 1.2 GB, instead of 26 GB of model weights. Any download still needed, as for some LoRAs on FP8, shows its progress, size and speed instead of an unchanging “Loading model”.",
-      "On NVIDIA graphics cards with 8 GB or more, prompt enhancement needs about 4 GiB of free RAM instead of 11 GiB, and on 8 GB and 10 GB cards a rewrite takes tens of seconds instead of several minutes. While it runs, the status line shows how long it has taken.",
-      "Each saved video now takes far less disk space, about 40 MB instead of about 790 MB for a 10-second 1344 × 768 video, because the uncompressed video and audio are no longer kept. The first start after updating deletes them from earlier videos as well, and previews can still continue with Run second pass.",
-      "A new Repair button in the launcher fixes an installation in one step and keeps models and videos; it appears on the error card when the launcher finds a problem it can repair, and in Settings › Environment. A repair that only adds a few packages no longer asks for as much free disk space as a new installation.",
-      "On a Mac, when unified memory runs short, the second pass switches to a computation that uses less memory; if it still runs short, the first pass is kept and only the second pass runs again. When less memory is available than a video needs, FreeVideo says so as soon as generation starts.",
-      "Fixes: on Linux, desktops without xdg-open can open FreeVideo in the browser, and the background service starts when the folder name contains %, $, quotes or backslashes; when port 8188 is in use, the launcher starts ComfyUI on a free port and shows the new address; and Captions only in the image editor no longer leaves white specks when it sweeps a caption in several strokes. With a self-installed ComfyUI updated to a recent version, each video appears once in Assets instead of twice, and paths with hidden folders no longer show <PATH><PATH> in the launcher terminal and diagnostic reports."
+      "After an update, an installation, a repair or a graphics driver update, FreeVideo compiles in the background while it is idle, which takes two to three minutes, and the first video after that no longer waits for compiling; the background work stops as soon as a video starts.",
+      "Clearing the system's temporary files no longer slows the next video: compiled results are now kept in the FreeVideo folder.",
+      "On Windows PCs with less RAM, each step reads less from the drive, and the second pass of a two-pass video starts sooner; 8 GB RTX 30-series cards also run the second pass of full-size videos faster.",
+      "With prompt enhancement on, a rewrite starts 3–4 seconds sooner. The background preparation uses about 0.7 GiB of RAM and no GPU memory, and it stops when a video starts generating.",
+      "Repair also restores ComfyUI packages whose files were deleted or changed, and replaces model files that differ from the tested version, keeping the original under a new name. When the text encoder folder holds a same-named file of a different size, generation uses the tested one.",
+      "FreeVideo installed from an offline package now updates its engine with the launcher without downloading; an older launcher no longer overwrites a newer FreeVideo, and both versions are shown when they differ.",
+      "When a browser extension interferes with FreeVideo, the error card names the extension and lists ways to fix it.",
+      "View licenses in the license step lists each license you accept, and the full texts open without a connection.",
+      "Fixes: after an engine update, commands run with the engine's own Python use the new FreeVideo; on Linux, Install / repair completes when the uv tool in the installation folder is a link to another location."
     ]
   },
   "zh": {
-    "summary": "生成和安装的进度只显示一个总百分比，并给出在做什么、下了多少等必要的细节；创作面板铺满整个窗口；RTX 50 显卡不再因驱动缓存写满而反复停顿，启动后的第一个视频等待更短。",
+    "summary": "更新后的编译改在空闲时于后台完成，内存较小的 Windows 电脑和 8 GB 的 RTX 30 显卡生成更快；“修复”能处理更多情况，离线安装也能随启动器更新引擎。",
     "changes": [
-      "启动后的第一个视频等文本编码器的时间更短，最多少等约 15 秒。在 Windows 上的 RTX 40、RTX 50 显卡以及 Linux 上，解码时更多的解码器留在显卡上（12 GB 显卡可以全部留下），解码更快。",
-      "在使用 RTX 50 系显卡的 Windows 电脑上，显卡驱动的编译缓存写满后，生成时不再反复停顿。",
-      "在 Windows 上，显存和内存都放不下整个视频模型时，生成时等硬盘的时间更短。生成期间其他程序占用了显存时，解码不再因显存不足而从头再来一遍。",
-      "生成进度只显示一个总百分比、正在做的那一步和已用时间，慢的阶段下面多一条小进度条，跑完两步后再显示预计剩余时间；安装、修复和更新时，下载会写明在下什么、下了多少和速度。加载视频模型时不再因显卡驱动没有响应而一直卡住；长时间没有新的进度时，页面会说明生成仍在进行，并可以下载报告。",
-      "出错时，卡片用一句话说明发生了什么、该怎么做，原始报错收进“技术详情”；参考视频太短、LoRA 暂时不能用于 int8 模型等情况各有自己的说明。兼容性设置也改成说明每一档的效果。",
-      "创作面板和作品窗口现在铺满浏览器窗口，视频预览随窗口一起变大。窗口宽 1680 像素以上时，右侧会多出“最近作品”一栏，点击其中的视频会在预览中播放，预览标题行的按钮可以收起这一栏。",
-      "选用自定义步数时，第一次只需下载一个采样表（最多 1.2 GB），不再先下载 26 GB 的模型权重。仍需下载时（例如 FP8 上的部分 LoRA），会显示进度、大小和速度，不再一直停在“加载模型”。",
-      "在 8 GB 及以上的 NVIDIA 显卡上，提示词增强只需约 4 GiB 可用内存（原来要 11 GiB），8 GB 和 10 GB 显卡上的改写从几分钟缩短到几十秒。改写时，状态栏会显示已用时间。",
-      "保存的视频占用的磁盘空间大幅减少：10 秒、1344 × 768 的视频从约 790 MB 降到约 40 MB，因为不再保留未压缩的画面和音频。更新后第一次启动时，也会删除之前视频里的这些文件；预览仍然可以点“继续二采”。",
-      "启动器新增“修复”按钮，一步修好安装，模型和视频都会保留；发现可以修复的问题时，出错卡片上会出现这个按钮，“设置 → 环境”里也有。只需补装几个包的修复，不再要求和全新安装一样多的空闲磁盘空间。",
-      "在 Mac 上，统一内存不足时，第二遍会改用占用内存更少的计算方式；仍然不足时，保留第一遍的结果，只重新运行第二遍。可用内存低于所需时，生成开始时就会给出提示。",
-      "修复：Linux 上，没有 xdg-open 的桌面也能在浏览器中打开 FreeVideo，文件夹名带 %、$、引号或反斜杠时后台服务也能启动；本机 8188 端口被占用时，启动器会改用空闲端口并说明新地址；图片编辑器的“只去字幕”分几笔扫过字幕时不再留下白点。自行将 ComfyUI 更新到较新版本后，每个视频在“资产”中不再出现两条记录；启动器终端和诊断报告里，隐去文件夹的路径不再显示为 <PATH><PATH>。"
+      "更新、安装、修复或更新显卡驱动后，FreeVideo 会在空闲时于后台完成编译，约两三分钟，之后的第一次生成不用再等编译；开始生成时后台编译会立即停止。",
+      "清理系统临时文件后，下一次生成不再变慢：编译结果改存在 FreeVideo 的目录里。",
+      "内存较小的 Windows 电脑上，生成时每一步从硬盘读取的数据更少，两遍生成的第二遍也开始得更快；8 GB 的 RTX 30 系列显卡上，全尺寸视频的第二遍更快。",
+      "开启提示词增强时，改写开始前少等 3–4 秒。为此 FreeVideo 会在后台提前做好准备，约占 0.7 GiB 内存，不占显存，开始生成视频时自动退出。",
+      "“修复”也会补回 ComfyUI 环境里被删除或改动的包，并把和测试版本不同的模型文件改名保留、换回测试过的版本。生成时如果文本编码器目录里有同名但大小不同的文件，会改用测试过的那份。",
+      "用离线整合包装的 FreeVideo 也会随启动器更新引擎，不用下载；旧启动器不再覆盖新版 FreeVideo，两者版本不同时会分别显示。",
+      "浏览器扩展干扰 FreeVideo 时，出错卡片会写出是哪个扩展，并给出解决办法。",
+      "许可确认里的“查看许可证”会列出要同意的每一项许可，断网也能打开全文。",
+      "修复：引擎更新后，用引擎自带 Python 运行的命令也会用新版 FreeVideo；Linux 上安装目录里的 uv 被换成链接时，“安装 / 修复”也能完成。"
     ]
   },
   "history": [
+    {
+      "product_version": "0.3.23",
+      "en": {
+        "summary": "Generation and installation progress show one overall percentage with the details that matter, such as the current step and how much has been downloaded; the workspace fills the window; RTX 50 GPUs no longer keep pausing when the driver cache is full, and the first video after a start waits less.",
+        "changes": [
+          "The first video after FreeVideo starts waits up to about 15 seconds less for the text encoder. On RTX 40 and RTX 50 cards under Windows, and on Linux, more of the video decoder stays on the graphics card while decoding (all of it on 12 GB cards), so decoding is faster.",
+          "On Windows with RTX 50 GPUs, generation no longer keeps pausing once the graphics driver's compile cache is full.",
+          "On Windows, when the video model fits neither in GPU memory nor in RAM, generation waits less for the drive. When another program takes GPU memory during generation, decoding no longer starts over because it ran out of memory.",
+          "Generation progress shows one overall percentage, the current step and the elapsed time, with a small bar under slow stages, and the remaining time appears after the first two steps; during installation, repair and updates, a download shows what is being downloaded, how much and how fast. Loading the video model no longer hangs when the graphics driver does not answer, and after a long time without progress the page says that generation is still running and offers the report.",
+          "Error cards now say in one sentence what happened and what to do, with the raw error under Technical details; cases such as a reference video that is too short or a LoRA that cannot be used with the int8 model yet each have their own message. The compatibility setting now describes what each level does.",
+          "The creative workspace and the Creations window now fill the browser window, so the video preview grows with it. On windows at least 1680 px wide, a Recent videos column appears on the right; clicking a video plays it in the preview, and a button in the preview header hides the column.",
+          "A custom step count now downloads only a sampling table the first time, up to 1.2 GB, instead of 26 GB of model weights. Any download still needed, as for some LoRAs on FP8, shows its progress, size and speed instead of an unchanging “Loading model”.",
+          "On NVIDIA graphics cards with 8 GB or more, prompt enhancement needs about 4 GiB of free RAM instead of 11 GiB, and on 8 GB and 10 GB cards a rewrite takes tens of seconds instead of several minutes. While it runs, the status line shows how long it has taken.",
+          "Each saved video now takes far less disk space, about 40 MB instead of about 790 MB for a 10-second 1344 × 768 video, because the uncompressed video and audio are no longer kept. The first start after updating deletes them from earlier videos as well, and previews can still continue with Run second pass.",
+          "A new Repair button in the launcher fixes an installation in one step and keeps models and videos; it appears on the error card when the launcher finds a problem it can repair, and in Settings › Environment. A repair that only adds a few packages no longer asks for as much free disk space as a new installation.",
+          "On a Mac, when unified memory runs short, the second pass switches to a computation that uses less memory; if it still runs short, the first pass is kept and only the second pass runs again. When less memory is available than a video needs, FreeVideo says so as soon as generation starts.",
+          "Fixes: on Linux, desktops without xdg-open can open FreeVideo in the browser, and the background service starts when the folder name contains %, $, quotes or backslashes; when port 8188 is in use, the launcher starts ComfyUI on a free port and shows the new address; and Captions only in the image editor no longer leaves white specks when it sweeps a caption in several strokes. With a self-installed ComfyUI updated to a recent version, each video appears once in Assets instead of twice, and paths with hidden folders no longer show <PATH><PATH> in the launcher terminal and diagnostic reports."
+        ]
+      },
+      "zh": {
+        "summary": "生成和安装的进度只显示一个总百分比，并给出在做什么、下了多少等必要的细节；创作面板铺满整个窗口；RTX 50 显卡不再因驱动缓存写满而反复停顿，启动后的第一个视频等待更短。",
+        "changes": [
+          "启动后的第一个视频等文本编码器的时间更短，最多少等约 15 秒。在 Windows 上的 RTX 40、RTX 50 显卡以及 Linux 上，解码时更多的解码器留在显卡上（12 GB 显卡可以全部留下），解码更快。",
+          "在使用 RTX 50 系显卡的 Windows 电脑上，显卡驱动的编译缓存写满后，生成时不再反复停顿。",
+          "在 Windows 上，显存和内存都放不下整个视频模型时，生成时等硬盘的时间更短。生成期间其他程序占用了显存时，解码不再因显存不足而从头再来一遍。",
+          "生成进度只显示一个总百分比、正在做的那一步和已用时间，慢的阶段下面多一条小进度条，跑完两步后再显示预计剩余时间；安装、修复和更新时，下载会写明在下什么、下了多少和速度。加载视频模型时不再因显卡驱动没有响应而一直卡住；长时间没有新的进度时，页面会说明生成仍在进行，并可以下载报告。",
+          "出错时，卡片用一句话说明发生了什么、该怎么做，原始报错收进“技术详情”；参考视频太短、LoRA 暂时不能用于 int8 模型等情况各有自己的说明。兼容性设置也改成说明每一档的效果。",
+          "创作面板和作品窗口现在铺满浏览器窗口，视频预览随窗口一起变大。窗口宽 1680 像素以上时，右侧会多出“最近作品”一栏，点击其中的视频会在预览中播放，预览标题行的按钮可以收起这一栏。",
+          "选用自定义步数时，第一次只需下载一个采样表（最多 1.2 GB），不再先下载 26 GB 的模型权重。仍需下载时（例如 FP8 上的部分 LoRA），会显示进度、大小和速度，不再一直停在“加载模型”。",
+          "在 8 GB 及以上的 NVIDIA 显卡上，提示词增强只需约 4 GiB 可用内存（原来要 11 GiB），8 GB 和 10 GB 显卡上的改写从几分钟缩短到几十秒。改写时，状态栏会显示已用时间。",
+          "保存的视频占用的磁盘空间大幅减少：10 秒、1344 × 768 的视频从约 790 MB 降到约 40 MB，因为不再保留未压缩的画面和音频。更新后第一次启动时，也会删除之前视频里的这些文件；预览仍然可以点“继续二采”。",
+          "启动器新增“修复”按钮，一步修好安装，模型和视频都会保留；发现可以修复的问题时，出错卡片上会出现这个按钮，“设置 → 环境”里也有。只需补装几个包的修复，不再要求和全新安装一样多的空闲磁盘空间。",
+          "在 Mac 上，统一内存不足时，第二遍会改用占用内存更少的计算方式；仍然不足时，保留第一遍的结果，只重新运行第二遍。可用内存低于所需时，生成开始时就会给出提示。",
+          "修复：Linux 上，没有 xdg-open 的桌面也能在浏览器中打开 FreeVideo，文件夹名带 %、$、引号或反斜杠时后台服务也能启动；本机 8188 端口被占用时，启动器会改用空闲端口并说明新地址；图片编辑器的“只去字幕”分几笔扫过字幕时不再留下白点。自行将 ComfyUI 更新到较新版本后，每个视频在“资产”中不再出现两条记录；启动器终端和诊断报告里，隐去文件夹的路径不再显示为 <PATH><PATH>。"
+        ]
+      }
+    },
     {
       "product_version": "0.3.22",
       "en": {
@@ -248,29 +279,6 @@
           "离线安装的文本编码器改用运行环境包内 ComfyUI 库的独立副本，更新或修改该 ComfyUI 不再影响提示词编码。",
           "跨版本更新时，更新说明会按从新到旧列出当前版本之后的每个版本。",
           "在节点视图下载报告时，文件按保存时间命名，与创作面板一致。"
-        ]
-      }
-    },
-    {
-      "product_version": "0.3.11",
-      "en": {
-        "summary": "Importing offline packages is faster and shows its progress throughout, setup works with an older Git, and a GPU slowed down by heat is named on the result.",
-        "changes": [
-          "Offline packages are checked once, while they are unpacked. Importing a package again, Checking packages before installing and the first start no longer read every file again.",
-          "The Working card shows which package is being imported and how far it is; Checking packages and Verify local files show their progress as well.",
-          "After the Environment package is imported, the model step no longer asks for it again.",
-          "On Windows, when the Git already installed is older than 2.35, setup uses FreeVideo's own verified Git instead of stopping with \"'origin' does not appear to be a git repository\". On Linux and macOS, setup names the Git version and asks for 2.35 or newer.",
-          "When the GPU spends most of a generation in thermal slowdown, the result says so, with the temperature and how far the clock dropped, and diagnostic reports include it."
-        ]
-      },
-      "zh": {
-        "summary": "离线包导入更快，全程都能看到进度；装有旧版 Git 的电脑可以正常安装；显卡因过热降频变慢时，结果下方会说明。",
-        "changes": [
-          "离线包只在解压时校验一次；再次导入同一个包、安装前「检查配套包」和首次启动都不再把所有文件重读一遍。",
-          "左侧「正在处理」卡片会显示正在导入第几个包和进度；「检查配套包」和「校验本地文件」也有进度条。",
-          "导入运行环境包后，模型这一步不再提示还需要运行环境包。",
-          "Windows 上如果已安装的 Git 低于 2.35，安装时会改用 FreeVideo 自带并校验过的 Git，不再因“'origin' does not appear to be a git repository”中断；Linux 和 macOS 会写明 Git 版本，并提示更新到 2.35 或更高版本。",
-          "显卡在生成过程中大部分时间因过热降频时，结果下方会说明温度和降频幅度，诊断报告中也会包含。"
         ]
       }
     }

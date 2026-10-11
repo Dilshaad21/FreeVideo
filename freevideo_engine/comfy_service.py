@@ -26,6 +26,7 @@ import threading
 import time
 
 from .monitoring import save
+from . import engine_binding
 
 DEFAULT_PORT = 8188
 RECORD = 'comfyui-cli.json'
@@ -100,6 +101,15 @@ def install(root, source, machine, port, out=say):
     """The pinned ComfyUI in <root>/ComfyUI with its own environment, and our node in it."""
     from .comfy_launcher_runtime import deploy, managed_python
     from .comfy_source import new_layout
+    previous = installed(root)
+    switching = previous is not None and Path(previous['source']).resolve() != Path(source).resolve()
+    if switching:
+        from .comfy_launcher_runtime import queue_busy
+        # A ComfyUI of this installation started elsewhere (the desktop launcher) has no service lock here.
+        if previous.get('url') and queue_busy(previous['url']):
+            raise RuntimeError('ComfyUI must stop before switching the engine source; the running job is left running.')
+    if switching and stop(root, out=out):
+        raise RuntimeError('ComfyUI must stop before switching the engine source; the running job is left running.')
     layout = new_layout(str(root))
     comfy = Path(layout['root'])
     python = managed_python(Path(root), comfy) if (comfy / 'main.py').is_file() else None
@@ -120,6 +130,8 @@ def install(root, source, machine, port, out=say):
         python = managed_python(Path(root), comfy)
         if python is None:
             raise RuntimeError('ComfyUI was installed, but its environment is incomplete. Run the same command again.')
+    if switching:
+        engine_binding.rebind(root, machine, source)
     deploy(comfy, source, root)
     record = dict(root=str(comfy), engine=str(Path(root)), source=str(source), python=python,
                   url='http://127.0.0.1:%d' % port)

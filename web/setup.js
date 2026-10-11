@@ -13,6 +13,21 @@ const cn = languageOverride === 'zh' || (languageOverride !== 'en'
     && String(navigator.language || '').toLowerCase().startsWith('zh'));
 const t = (en, zh) => cn ? zh : en;
 const gib = n => Number.isFinite(n) ? (n / 2 ** 30).toFixed(1) + " GiB" : "—";
+const failureText = value => {
+    const text = String(value || ''), matches = [...text.matchAll(/MODEL_MISMATCH_REPAIR: ([^\r\n]+)/g)];
+    if (!matches.length && text.includes('The installation plan changed. Detect configuration again')) {
+        const files = text.includes('A file in the installation folder changed after the review');
+        return files
+            ? t('The installation plan changed: files in the installation folder changed after you confirmed the plan, so FreeVideo stopped instead of continuing with it. Click Detect & review, then Install / repair to review the new plan.',
+                '安装计划有变化：确认计划之后，安装位置里的文件又有变化，FreeVideo 因此停止，未按原计划继续。请先点击“检测并预览”，再点击“安装／修复”，查看新的计划。')
+            : t('The installation plan changed: something changed after you confirmed the plan (for example the settings, the GPU or the free disk space), so FreeVideo stopped instead of continuing with it. Click Detect & review, then Install / repair to review the new plan.',
+                '安装计划有变化：确认计划之后，这台电脑的情况又有变化（例如设置、显卡或可用磁盘空间），FreeVideo 因此停止，未按原计划继续。请先点击“检测并预览”，再点击“安装／修复”，查看新的计划。');
+    }
+    if (!matches.length) return text;
+    const file = matches.at(-1)[1];
+    return t(`${file} differs from the version FreeVideo tests and was left unchanged. Click Detect & review, then Install / repair: the plan will list this file, and after you confirm, it is renamed and kept, and the tested version is downloaded.`,
+        `${file} 与 FreeVideo 测试过的版本不同，这次没有改动它。请先点击“检测并预览”，再点击“安装／修复”：计划里会列出这个文件，确认后会把它改名保留，再下载测试过的版本。`);
+};
 let current;
 
 export async function openSetup() {
@@ -137,7 +152,7 @@ export async function openSetup() {
     dialog.addEventListener('cancel', e => { e.preventDefault(); closeDialog(dialog); });
     document.body.append(dialog); dialog.showModal();
     let token, planId, busy = false, probeBusy = false, pollTimer, lastPlanId, planErrors = false, planStale = false, ready = false;
-    const fail = error => { installation.open = true; state.textContent = error.message; state.className = "fv-failure"; state.scrollIntoView({block:'nearest'}); };
+    const fail = error => { installation.open = true; state.textContent = failureText(error.message); state.className = "fv-failure"; state.scrollIntoView({block:'nearest'}); };
     const request = async (action, value) => {
         const response = await api.fetchApi("/freevideo/setup" + (action ? "/" + action : root.value ? '?root='+encodeURIComponent(root.value) : ""), action ? {
             method: "POST", headers: { "Content-Type": "application/json", "X-FreeVideo-Setup": token }, body: JSON.stringify(value || {}),
@@ -171,7 +186,7 @@ export async function openSetup() {
                                             '正在运行。进度见下方；关闭面板不会中断。');
         } catch (error) {
             calibrateStatus.className = 'fv-failure';
-            calibrateStatus.textContent = error.message;
+            calibrateStatus.textContent = failureText(error.message);
         } finally { calibrateButton.disabled = false; }
     };
     saveReserve.onclick = async () => {
@@ -180,7 +195,7 @@ export async function openSetup() {
         try {
             showResources(await request('resources', {[reserveField]: reserveAuto.checked ? null : Number(reserve.value)}));
             reserveStatus.textContent = t('Saved · applies to the next request', '已保存 · 下次生成生效');
-        } catch (error) { reserveStatus.textContent = error.message; }
+        } catch (error) { reserveStatus.textContent = failureText(error.message); }
         finally { saveReserve.disabled = false; }
     };
     function showDownloads(value) {
@@ -194,7 +209,7 @@ export async function openSetup() {
         probeBusy = value.probe?.status === 'running'; probeButton.disabled = probeBusy;
         probeButton.textContent = probeBusy ? t('Testing…','正在测速…') : t('Test source speeds','重新测速');
         const progress = value.probe?.progress;
-        sourceStatus.textContent = value.probe?.error || (probeBusy ? t('Testing sources… ','正在测速… ') + `${progress?.done || 0}/${progress?.total || '…'}` : '');
+        sourceStatus.textContent = failureText(value.probe?.error) || (probeBusy ? t('Testing sources… ','正在测速… ') + `${progress?.done || 0}/${progress?.total || '…'}` : '');
         const measured = value.probe?.status === 'complete' ? value.probe : value.preferences?.probe;
         if (measured?.network_unavailable && !probeBusy) sourceStatus.textContent = t('No sources reachable. Check your network or connection mode.', '下载源均无法连接，请检查网络或切换连接模式。');
         speeds.replaceChildren();
@@ -276,9 +291,14 @@ export async function openSetup() {
         const list = node('dl'); list.className = 'fv-facts';
         for (const [key, shown] of facts) list.append(node('dt', key), node('dd', shown));
         plan.append(list);
+        for (const line of value.replace_models_text?.[cn ? 'zh' : 'en'] || []) {
+            const replacement = node('div'); replacement.className = 'fv-model-repair';
+            const path = note(line.path); path.classList.add('fv-model-repair-path');
+            replacement.append(node('p', line.text), path); plan.append(replacement);
+        }
         if (value.prepared_model?.private) plan.append(note(t("Private repository: authorized Hugging Face login/token required.", "私有仓库：需要有访问权限的 Hugging Face 登录／token。")));
         const licenses = node("details"); licenses.append(node("summary", t("Model and toolkit licenses", "模型与工具包许可证")), node("pre", value.licenses?.join("\n") || "")); plan.append(licenses);
-        if (value.errors?.length) { const e = node("p", value.errors.join("\n")); e.className = "fv-failure"; plan.append(e); }
+        if (value.errors?.length) { const e = node("p", value.errors.map(failureText).join("\n")); e.className = "fv-failure"; plan.append(e); }
     }
     function render(task) {
         busy = Boolean(task.busy); ready = Boolean(task.ready) || ready && task.status !== 'failed';
@@ -292,7 +312,7 @@ export async function openSetup() {
         acceptLabel.hidden = busy || !planId;
         const p = task.progress || {};
         state.className = task.status === "failed" ? "fv-failure" : task.ready ? "fv-ready" : "";
-        state.textContent = task.error || (task.ready ? t("Ready. Generate with your existing workflow.", "准备就绪，可使用现有工作流生成。") : busy ? p.label || t("Checking configuration and local models…", "正在检查配置和本地模型…") : task.status === "complete" && task.action === "plan" ? (planId ? t("Review the plan, then install.", "请确认计划后安装。") : "") : task.status === "cancelled" ? t("Stopped. Files retained for resuming.", "已停止，文件保留，可继续安装。") : "");
+        state.textContent = failureText(task.error) || (task.ready ? t("Ready. Generate with your existing workflow.", "准备就绪，可使用现有工作流生成。") : busy ? p.label || t("Checking configuration and local models…", "正在检查配置和本地模型…") : task.status === "complete" && task.action === "plan" ? (planId ? t("Review the plan, then install.", "请确认计划后安装。") : "") : task.status === "cancelled" ? t("Stopped. Files retained for resuming.", "已停止，文件保留，可继续安装。") : "");
         const phases = task.phase_progress || {}, valid = Number.isFinite(p.total) && p.total > 0 && Number.isFinite(p.done) && p.done >= 0 && p.done <= p.total;
         overall.hidden = !busy;
         overallBar.max = phases.total > 0 ? phases.total : 1; overallBar.value = phases.done || 0;
@@ -303,7 +323,8 @@ export async function openSetup() {
         const eta = valid && Number.isFinite(p.remaining_seconds) && p.remaining_seconds > 0 ? `${p.unit === "bytes" ? t("File ETA", "本文件预计剩余") : t("ETA", "预计剩余")} ~${Math.ceil(p.remaining_seconds)} s` : t("Estimating remaining time…", "正在估算剩余时间…");
         counters.textContent = busy ? `${count} · ${eta}` : "";
         const others = (task.active_tasks || []).slice(1).map(p => p.label).filter(Boolean);
-        detail.textContent = [p.detail, p.resource, others.length ? `${t("Also running", "同时进行")}: ${others.join(" / ")}` : ""].filter(Boolean).join(" · ");
+        const progressDetail = (p.detail || '').replace(/^Keeping the original file: /, t('Keeping the original file: ', '正在保留原文件：'));
+        detail.textContent = [progressDetail, p.resource, others.length ? `${t("Also running", "同时进行")}: ${others.join(" / ")}` : ""].filter(Boolean).join(" · ");
         log.textContent = [task.log, task.tail].filter(Boolean).join("\n"); controls();
     }
     async function poll() {

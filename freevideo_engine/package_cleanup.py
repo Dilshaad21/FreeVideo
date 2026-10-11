@@ -143,7 +143,8 @@ def discard(path, root, running=None, dry_run=False):
     """
     from .version_cleanup import started_from, plain_tree
     path, root = Path(path), Path(root)
-    if not local_path(root, path) or started_from(path, running) or (path.is_dir() and not plain_tree(path)):
+    if ('.replaced-' in path.name or not local_path(root, path) or started_from(path, running)
+            or (path.is_dir() and not plain_tree(path))):
         return None
     freed = unique_bytes(path)
     if dry_run:

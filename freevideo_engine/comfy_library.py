@@ -71,6 +71,10 @@ def list_videos(output_directory, *, before=None, limit=24):
             summary['geometry'] = {k: v for k, v in summary['geometry'].items()
                                    if k in ('width', 'height', 'frames', 'fps', 'seconds')
                                    and type(v) in (int, float)}
+            if 'encoder_file' in summary:
+                # The library API exposes only relative paths.
+                summary['encoder_file'] = dict(summary['encoder_file'])
+                summary['encoder_file'].pop('path', None)
             if not (root / summary['report']).is_file():
                 summary['report'] = None
             rows.append(dict(summary, id=key[1], bytes=info.st_size,

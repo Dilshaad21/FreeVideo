@@ -71,6 +71,24 @@ def since(release, installed):
     return [row for row in rows if version_key(row['product_version']) > version_key(current)]
 
 
+def older(candidate, installed):
+    """Whether candidate is an earlier release than installed, by their stamped identities.
+
+    The product version decides; within one version, the build time. A build
+    that carries neither cannot be ordered, so it never counts as older."""
+    first, second = product_version(candidate.get('product_version')), product_version(installed.get('product_version'))
+    if first and second and first != second:
+        return version_key(first) < version_key(second)
+    early, late = candidate.get('built_at'), installed.get('built_at')
+    return type(early) is int and type(late) is int and 0 < early < late
+
+
+def label(identity):
+    """How a build names itself to people: its product version, else its build number."""
+    version = product_version(identity.get('product_version'))
+    return 'v' + version if version else str(identity.get('version') or '')
+
+
 def optional_fields(value):
     result = {}
     if not isinstance(value, dict):

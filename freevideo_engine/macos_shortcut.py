@@ -9,7 +9,7 @@ import sys
 import tempfile
 import uuid
 
-from .desktop_shortcut import digest
+from .desktop_shortcut import digest, read_build
 from .monitoring import save
 
 
@@ -79,16 +79,28 @@ def retained_application(engine):
 
 def create(engine):
     receipt = Path(engine) / 'launcher/desktop-shortcut.json'
-    target = retained_application(engine)
     desktop = desktop_directory().resolve()
     path = desktop / 'FreeVideo.app'
     try:
         previous = json.loads(receipt.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         previous = {}
+    if not isinstance(previous, dict):
+        previous = {}
     old = Path(previous.get('path', str(path)))
     owned = (old.parent == desktop and old.is_symlink()
              and os.readlink(old) == previous.get('target'))
+    if owned:
+        from .launcher_update import current_build
+        from .release_notes import older
+        # build_macos.py adds the stamp as a root data file. PyInstaller puts it
+        # in Resources, cross-linked from Frameworks (the bootloader's _MEIPASS).
+        identity = read_build(old / 'Contents/Resources/launcher-build.json')
+        if not identity:
+            identity = read_build(old / 'Contents/Frameworks/launcher-build.json')
+        if older(current_build() or {}, identity):
+            return dict(previous, status='present')
+    target = retained_application(engine)
     if owned:
         path = old
         if previous['target'] == str(target):

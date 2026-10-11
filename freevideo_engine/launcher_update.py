@@ -107,8 +107,12 @@ def manifest(value):
 
 
 def newer(candidate, current):
+    from .release_notes import older
     return (build_target(candidate) == build_target(current)
-            and candidate['channel'] == current['channel'] and build_track(candidate) == build_track(current)
+            and candidate.get('channel', CHANNEL) == current.get('channel', CHANNEL)
+            and build_track(candidate) == build_track(current)
+            and not older({'product_version': candidate.get('product_version')},
+                          {'product_version': current.get('product_version')})
             and candidate['revision'] != current['revision'] and candidate['built_at'] > current['built_at'])
 
 

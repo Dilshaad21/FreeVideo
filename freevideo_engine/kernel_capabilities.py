@@ -59,12 +59,8 @@ def readiness(rows):
                                           if row.get('status') != 'complete' and row['backend'] != 'linear'])
 
 
-def available_backends(hardware, *, discovered=None, probe_missing=True):
-    """Reuse matching checks; re-probe after a GPU, driver or package/code change.
-
-    Read-only planning may opt out of probing. Execution callers never turn an
-    unavailable requested backend into another backend or a math SDPA kernel.
-    """
+def matching_receipt(hardware, discovered=None):
+    """The saved kernel checks when they still match this GPU, driver and packages; else None."""
     discovered = set(installed_backends() if discovered is None else discovered)
     expected = identity(hardware)
     # Normalize tuples exactly as on disk.
@@ -82,6 +78,17 @@ def available_backends(hardware, *, discovered=None, probe_missing=True):
             receipt = None
     except (OSError, ValueError, KeyError, TypeError):
         receipt = None
+    return receipt
+
+
+def available_backends(hardware, *, discovered=None, probe_missing=True):
+    """Reuse matching checks; re-probe after a GPU, driver or package/code change.
+
+    Read-only planning may opt out of probing. Execution callers never turn an
+    unavailable requested backend into another backend or a math SDPA kernel.
+    """
+    discovered = set(installed_backends() if discovered is None else discovered)
+    receipt = matching_receipt(hardware, discovered)
     if receipt is None:
         if not probe_missing:
             return discovered

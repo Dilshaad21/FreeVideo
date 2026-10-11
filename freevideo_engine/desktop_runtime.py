@@ -73,6 +73,27 @@ def matching_source(bundled, installed):
         return False
 
 
+def source_release(source):
+    """The product version, build time and build number stamped into an engine source.
+
+    A source checkout has no stamp and returns an empty identity."""
+    from .release_notes import product_version
+    try:
+        stamp = json.loads((Path(source) / 'freevideo_engine' / 'build-identity.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(stamp, dict):
+        return {}
+    result = {}
+    if product_version(stamp.get('product_version')):
+        result['product_version'] = stamp['product_version']
+    if type(stamp.get('built_at')) is int and stamp['built_at'] > 0:
+        result['built_at'] = stamp['built_at']
+    if isinstance(stamp.get('version'), str) and len(stamp['version']) <= 64:
+        result['version'] = stamp['version']
+    return result
+
+
 def check_launcher_dependencies():
     """Exercise the native process extension, including inside the frozen EXE."""
     import psutil

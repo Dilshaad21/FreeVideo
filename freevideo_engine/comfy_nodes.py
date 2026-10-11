@@ -88,6 +88,9 @@ class FreeVideoGenerate(io.ComfyNode):
         from .two_pass import validate_steps
         if not refine_from:
             validate_steps(base_steps, refine_steps, two_pass)
+        from .background_compile import COMPILE
+        # Returns once the idle compile released the GPU and the engine lease.
+        COMPILE.stop(final=True)
         from .comfy_media import export
         import folder_paths
         import comfy.model_management as memory
@@ -96,6 +99,8 @@ class FreeVideoGenerate(io.ComfyNode):
         from .comfy_progress import publish
         from .encoder_prewarm import IDLE
         from .resident_process import OWNER
+        from .prompt_vlm.service import stop_prestart_for_generation
+        stop_prestart_for_generation(PromptServer.instance)
         prewarm = {}
         result_reused = [False]
         node_id = cls.hidden.unique_id
@@ -346,9 +351,37 @@ class FreeVideoFrames(io.ComfyNode):
             return io.NodeOutput(*(torch.from_numpy(frame.copy()).float().div_(255)[None] for frame in (first, last)))
 
 
+def start_background_compile():
+    """Compile recent request shapes once this session is idle; see background_compile."""
+    import os
+    from server import PromptServer
+    from .background_compile import COMPILE
+    if os.environ.get('FREEVIDEO_BACKGROUND_COMPILE', 'auto').lower() in ('0', 'off', 'false'):
+        return False
+    root, machine = comfy_bridge.installation()
+    if machine.get('device_backend') == 'mps' or machine.get('gpu_vendor') == 'amd':
+        return False
+    source = comfy_bridge.source_root()
+    environment = comfy_bridge.engine_environment(root, source)
+    # This process's own GPU use is not another program's (background_room).
+    environment.update(FREEVIDEO_HOME=str(root), PYTHONPATH=str(source), FREEVIDEO_BACKGROUND_OWNER=str(os.getpid()))
+    def busy():
+        server = PromptServer.instance
+        return server is not None and server.prompt_queue.get_tasks_remaining() > 0
+    return COMPILE.start([machine['python'], '-B', '-m', 'freevideo_engine.precompile',
+                          '--config', str(root / 'machine.json'), '--background'],
+                         environment=environment, cwd=str(source), log=root / 'precompile.log',
+                         lock=environment.get('FREEVIDEO_LOCK_PATH') or root / 'engine.lock', busy=busy)
+
+
 class FreeVideoExtension(ComfyExtension):
     async def get_node_list(self):
         from .comfy_residency import install
         import comfy.model_management
         install(comfy.model_management)
+        try:
+            start_background_compile()
+        except Exception as error:
+            # Optional: the first request compiles what it needs, as before.
+            logging.warning('[FreeVideo] Background compile not started: %s', error)
         return [FreeVideoGenerate, FreeVideoMedia, FreeVideoReference, FreeVideoLoRA, FreeVideoLoRAStack, FreeVideoFrames]

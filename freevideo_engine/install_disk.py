@@ -128,12 +128,14 @@ def check_floor(paths):
                                (parent, free / GiB))
 
 
-def check_models(entries):
+def check_models(entries, replacements=()):
     """Recheck actual free disk AFTER package cleanup, before writing any models."""
     disks = {}
     for row, path, _, local in entries:
         remaining = row['bytes']
-        if path.is_file() and path.stat().st_size == remaining:
+        if str(path) in replacements:
+            pass  # The approved original stays on disk; budget a full new download.
+        elif path.is_file() and path.stat().st_size == remaining:
             remaining = 0  # provision still verifies its pinned content.
         elif local and local.get('method') == 'hardlink':
             remaining = 0

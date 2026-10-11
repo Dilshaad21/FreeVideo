@@ -17,6 +17,29 @@ COMPILER_ENVIRONMENT_KEYS = (
 CUDA_CACHE_MAXSIZE = str(4 << 30)
 
 
+def torch_default_inductor_cache():
+    """torch.compile's own default, as torch._inductor.runtime.cache_dir_utils builds it.
+
+    The first time torch needs this folder it writes it back into os.environ.
+    A ComfyUI process that has touched torch.compile then hands the temporary
+    folder to every child as if a caller had chosen it, and system cleanup of
+    temporary files deletes the compiled graphs.
+    """
+    import getpass
+    import re
+    import tempfile
+    try:
+        username = getpass.getuser()
+    except (KeyError, ModuleNotFoundError, OSError):
+        getuid = getattr(os, 'getuid', None)
+        username = f'uid_{getuid()}' if callable(getuid) else 'unknown_user'
+    return os.path.join(tempfile.gettempdir(), 'torchinductor_' + re.sub(r'[\\/:*?"<>|]', '_', username))
+
+
+def _same_path(first, second):
+    return os.path.normcase(os.path.abspath(first)) == os.path.normcase(os.path.abspath(second))
+
+
 def environment(root, environ):
     """Configure child compilers before imports, including encoder prewarming."""
     env = dict(environ)
@@ -26,6 +49,11 @@ def environment(root, environ):
                         ('CUDA_CACHE_PATH', 'cuda')):
         if not env.get(key):
             env[key] = str(cache / folder)
+    # Generation and background precompiling must share one folder, and it
+    # belongs to the installation. Only torch's inherited default is replaced;
+    # a folder someone set on purpose stays.
+    if _same_path(env['TORCHINDUCTOR_CACHE_DIR'], torch_default_inductor_cache()):
+        env['TORCHINDUCTOR_CACHE_DIR'] = str(cache / 'inductor')
     if not env.get('CUDA_CACHE_MAXSIZE'):
         env['CUDA_CACHE_MAXSIZE'] = CUDA_CACHE_MAXSIZE
     if os.name == 'nt' and any(not os.path.abspath(env[key]).isascii()

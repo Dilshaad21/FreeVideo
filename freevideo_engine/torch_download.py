@@ -70,7 +70,7 @@ def fetch(row, root, family, networking, env, ui, check):
     return path
 
 
-def install(uv, python, pins, cuda, *, root, networking, env, ui, run, constraints=(), check=None):
+def install(uv, python, pins, cuda, *, root, networking, env, ui, run, constraints=(), check=None, reinstall=()):
     """Return False for a pin set outside the verified catalog; caller keeps its route."""
     selected = select(pins, cuda)
     if selected is None:
@@ -83,7 +83,7 @@ def install(uv, python, pins, cuda, *, root, networking, env, ui, run, constrain
     # CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH, and setup or repair would
     # otherwise find nothing to do.
     from .runtime_libraries import damaged, reinstall_arguments
-    broken = damaged(python)
+    broken = sorted(set(damaged(python)).union(reinstall))
     if all(installed.get(row['package']) == row['version'] for row in selected) and not broken:
         return True
     family = 'torch-' + cuda + '-' + next(row['version'].split('+')[0] for row in selected if row['package'] == 'torch')

@@ -49,6 +49,28 @@ def open_browser(url):
         return webbrowser.open(url, new=2)
 
 
+
+def open_text(path):
+    """Show a text file on this computer (a licence, the notices) in the system's text viewer."""
+    path = str(path)
+    with external_python():
+        if windows():
+            if path.lower().endswith('.txt'):
+                import os
+                os.startfile(path)
+            else:
+                # LICENSE has no program of its own; Notepad reads it.
+                import subprocess
+                subprocess.Popen(['notepad.exe', path])
+            return True
+        if sys.platform == 'darwin':
+            import subprocess
+            subprocess.Popen(['/usr/bin/open', '-t', path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+            return True
+    from pathlib import Path
+    return open_browser(Path(path).as_uri())
+
 def hidden_console():
     """Hide a console and keep it inheritable by native helper processes."""
     if not windows():

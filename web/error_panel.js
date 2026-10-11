@@ -1,4 +1,5 @@
 // Shared by the Studio and graph view. Text only; never render exception HTML.
+import {detectBrowserExtension, browserExtensionAdvice, extensionSteps} from './browser_extension.js';
 const reports = new WeakSet();
 const captured = new WeakMap();
 const diagnosticReports = new WeakSet();
@@ -59,6 +60,7 @@ export function errorText(detail) {
     if (scalar(detail?.node_id)) rows.unshift(`Node ${scalar(detail.node_id)} (${scalar(detail.node_type) || 'unknown'}):`);
     if (scalar(detail?.exception_type)) rows.unshift(detail.exception_type);
     if (scalar(error?.details)) rows.push(error.details);
+    if (scalar(detail?.details)) rows.push(detail.details);
     for (const [id, node] of Object.entries(record(response.node_errors ?? detail?.node_errors))) {
         rows.push(`Node ${id} (${scalar(node?.class_type) || 'unknown'}):`);
         for (const reason of list(node?.errors))
@@ -106,7 +108,7 @@ function reportRedactor(detail, context) {
     for (const node of Object.values(record(detail?.response?.node_errors ?? detail?.node_errors)))
         for (const reason of list(node?.errors)) remember(reason?.extra_info?.received_value);
     const values = [...hidden].sort((a, b) => b.length - a.length);
-    return value => {
+    const removeInputs = value => {
         let text = scalar(value);
         for (const secret of values) {
             // Short widget values (e.g. "a") must not erase every occurrence
@@ -117,6 +119,10 @@ function reportRedactor(detail, context) {
                 text = text.replace(new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'gu'), '$1<INPUT REMOVED>');
             }
         }
+        return text;
+    };
+    const redact = value => {
+        let text = removeInputs(value);
         text = text.replace(/\b(?:https?|wss?|ftp|file):\/\/[^\s<>"']+/gi, '<URL REMOVED>')
             .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '<CREDENTIAL REMOVED>')
             .replace(/\b(?:hf_|sk-|gh[pousr]_|github_pat_)[A-Za-z0-9_-]{8,}\b/g, '<CREDENTIAL REMOVED>')
@@ -134,6 +140,9 @@ function reportRedactor(detail, context) {
         text = text.replace(/data:[^\s"'<>]+/gi, '<DATA REMOVED>');
         return text;
     };
+    // Echoed input text only, for deciding what the error is about.
+    redact.inputsOnly = removeInputs;
+    return redact;
 }
 
 export function createErrorReport(detail, context = {}) {
@@ -167,13 +176,19 @@ export function createErrorReport(detail, context = {}) {
     for (const key of ['done', 'total']) if (Number.isFinite(context.progress?.[key])) progress[key] = context.progress[key];
     const message = scalar(response.error?.message) || scalar(response.error) || scalar(response.message)
         || scalar(detail?.exception_message) || scalar(detail?.message) || scalar(detail) || 'FreeVideo generation failed.';
+    const known = knownError(message);
+    const kind = failureAdvice(errorText(detail), (en) => en, known).kind;
+    const found = detectBrowserExtension(detail, {kind, known, scrub: clean.inputsOnly});
+    // A script name the report would redact is not shown or saved either.
+    const extension = found && {...found, script: found.script && clean(found.script) === found.script ? found.script : null};
     const report = {
         schema: 'freevideo.error-report', schema_version: 1, created_at: new Date().toISOString(),
         stage, message: clean(message),
         // Chosen from the original message before redaction removes any input
         // text from it, so a card shown again from this report keeps its advice.
-        known_error: knownError(message),
-        error_details: clean(scalar(response.error?.details)),
+        known_error: known,
+        browser_extension: extension,
+        error_details: clean(scalar(response.error?.details) || scalar(detail?.details)),
         exception_type: clean(scalar(detail?.exception_type) || scalar(response.error?.type) || scalar(detail?.name)),
         http_status: Number.isInteger(detail?.status) ? detail.status : null,
         nodes, settings, progress, details: clean(errorText(detail)),
@@ -286,7 +301,18 @@ function showFailureDialog(report, t) {
     const close = document.createElement('button'); close.type = 'button';
     close.textContent = t('Got it', '知道了'); close.autofocus = true;
     close.onclick = () => dialog.close();
-    dialog.append(panel.element, close);
+    if (panel.element.freevideoKind === 'browser-extension') {
+        // The steps end with a reload: that is the main button. Copy and export
+        // sit at the left of the same row, so a long title keeps its own line.
+        const footer = document.createElement('div'); footer.className = 'fv-failure-footer';
+        const actions = panel.element.querySelector('.fv-failure-actions');
+        actions.querySelector('.fv-failure-reload')?.remove();
+        const reload = document.createElement('button'); reload.type = 'button'; reload.className = 'fv-failure-primary';
+        reload.textContent = t('Reload page', '刷新页面'); reload.autofocus = true; reload.onclick = () => globalThis.location?.reload();
+        close.textContent = t('Close', '关闭'); close.autofocus = false;
+        footer.append(actions, close, reload);
+        dialog.append(panel.element, footer);
+    } else dialog.append(panel.element, close);
     dialog.onclose = () => { if (activeDialog === dialog) activeDialog = null; dialog.remove(); };
     document.body.append(dialog);
     if (typeof dialog.showModal !== 'function') { dialog.remove(); return; }
@@ -307,8 +333,10 @@ export function createErrorPanel(t) {
 .fv-failure button,.fv-failure-dialog>button{min-height:var(--fv-h-sm,32px);border:1px solid var(--fv-border,#45454a);border-radius:var(--fv-r-sm,8px);background:var(--fv-raised,#303138);color:var(--fv-ink,#eee);padding:5px 12px;font:inherit;font-weight:var(--fv-medium,500);cursor:pointer}
 .fv-failure p{font-size:14px;line-height:1.6;margin:8px 0}.fv-failure summary{cursor:pointer;margin-top:12px}.fv-failure .fv-failure-cause{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}.fv-failure .fv-failure-privacy{font-size:12px;color:var(--fv-muted,#bbb)}
 .fv-failure code{display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:inherit;white-space:nowrap;background:var(--fv-raised);border-radius:var(--fv-r-xs,3px);padding:0 3px}
-.fv-failure-dialog{box-sizing:border-box;width:min(560px,94vw);max-height:88vh;overflow:auto;padding:22px 24px;border:1px solid var(--fv-border,#45454a);border-radius:var(--fv-r-lg,16px);background:var(--fv-bg,#202126);color:var(--fv-ink,#eee);box-shadow:0 24px 80px #0008}
-.fv-failure-dialog::backdrop{background:#070a0db8;backdrop-filter:blur(6px)}.fv-failure-dialog>.fv-failure{border:0;margin:0 0 16px;padding:0}.fv-failure-dialog>button{display:block;margin-left:auto;background:var(--fv-accent,#6db8fa);border-color:var(--fv-accent,#6db8fa);color:var(--fv-bg,#111720);font-weight:var(--fv-semibold,600)}`;
+.fv-failure-dialog{box-sizing:border-box;font-size:14px;width:min(560px,94vw);max-height:88vh;overflow:auto;padding:22px 24px;border:1px solid var(--fv-border,#45454a);border-radius:var(--fv-r-lg,16px);background:var(--fv-bg,#202126);color:var(--fv-ink,#eee);box-shadow:0 24px 80px #0008}
+.fv-failure-dialog::backdrop{background:#070a0db8;backdrop-filter:blur(6px)}.fv-failure-dialog>.fv-failure{border:0;margin:0 0 16px;padding:0}.fv-failure-dialog>button,.fv-failure-dialog .fv-failure-primary{display:block;margin-left:auto;background:var(--fv-accent,#6db8fa);border-color:var(--fv-accent,#6db8fa);color:var(--fv-bg,#111720);font-weight:var(--fv-semibold,600)}
+.fv-failure .fv-extension-steps{font-size:14px;line-height:1.6}.fv-failure-reload{order:-1}.fv-failure-footer{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.fv-failure-footer>.fv-failure-actions{margin-right:auto}
+.fv-failure-footer button{min-height:var(--fv-h-sm,32px);border:1px solid var(--fv-border,#45454a);border-radius:var(--fv-r-sm,8px);background:var(--fv-raised,#303138);color:var(--fv-ink,#eee);padding:5px 12px;font:inherit;font-weight:var(--fv-medium,500);cursor:pointer}.fv-failure-footer .fv-failure-primary{margin-left:0}`;
         document.head.append(style);
     }
     const element = document.createElement('section'); element.className = 'fv-failure'; element.hidden = true;
@@ -316,8 +344,12 @@ export function createErrorPanel(t) {
     const title = document.createElement('strong'); title.textContent = t('Generation failed', '生成失败');
     const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = t('Copy error', '复制错误');
     const download = document.createElement('button'); download.type = 'button'; download.textContent = t('Export report', '导出报告');
+    // Shown only for a browser extension, whose steps end with a reload.
+    const reload = document.createElement('button'); reload.type = 'button'; reload.className = 'fv-failure-reload';
+    reload.textContent = t('Reload page', '刷新页面'); reload.hidden = true; reload.onclick = () => globalThis.location?.reload();
     const actions = document.createElement('div'); actions.className = 'fv-failure-actions';
-    actions.append(copy, download);
+    // Last in the DOM, first on screen (CSS order), so copy stays the first child.
+    actions.append(copy, download, reload);
     const explanation = document.createElement('p'), action = document.createElement('p');
     const location = document.createElement('p'), cause = document.createElement('p'); cause.className = 'fv-failure-cause';
     location.className = 'fv-failure-location';
@@ -367,7 +399,9 @@ export function createErrorPanel(t) {
     head.append(title, actions); element.append(head, explanation, location, cause, action, disclosure, privacy, downloadStatus);
     return {element, show(value, popup = true, context = {}) {
         const report = createErrorReport(value, context); currentReport = report;
-        const advice = failureAdvice(report.details, t, report.known_error ?? null);
+        const advice = report.browser_extension
+            ? browserExtensionAdvice(report.browser_extension, t)
+            : failureAdvice(report.details, t, report.known_error ?? null);
         if (report.stage === 'submission' && advice.kind === 'unknown') {
             advice.title = t('The task could not be submitted', '任务提交失败');
             advice.summary = t('The task submission returned an error. Its details are shown below.', '提交任务时返回了错误，具体原因显示在下方。');
@@ -379,6 +413,9 @@ export function createErrorPanel(t) {
         if (advice.kind === 'unknown' && ['submission', 'queue'].includes(report.stage))
             advice.action = t('Copy the error details when reporting the issue; they include the failed stage when available.', '反馈问题时请复制错误详情，其中会保留已记录的失败阶段。');
         title.textContent = advice.title; explanation.textContent = advice.summary; action.textContent = advice.action;
+        element.querySelector('.fv-extension-steps')?.remove();
+        if (advice.kind === 'browser-extension') action.after(extensionSteps(advice));
+        element.freevideoKind = advice.kind; reload.hidden = advice.kind !== 'browser-extension';
         if (advice.kind === 'fa4-update') {
             const command = 'freevideo setup --fa4-guard';
             const [before, after] = advice.summary.split(command);
@@ -394,7 +431,8 @@ export function createErrorPanel(t) {
             `${node.type || t('Node', '节点')} #${node.id}${error.input ? ' · ' + error.input : ''}: ${error.message}${error.details ? ': ' + error.details : ''}`));
         const causeText = shownCause(reasons.length ? reasons.join('\n') : [report.message, report.error_details].filter(Boolean).join('\n'));
         const internal = advice.kind === 'unknown' && !['submission', 'queue'].includes(report.stage);
-        const causeInDetails = advice.kind !== 'validation' && !['submission', 'queue'].includes(report.stage);
+        const causeInDetails = advice.kind === 'browser-extension'
+            || advice.kind !== 'validation' && !['submission', 'queue'].includes(report.stage);
         location.hidden = causeInDetails; detailLocation.hidden = !causeInDetails;
         detailLocation.textContent = causeInDetails ? location.textContent : '';
         if (causeInDetails) location.textContent = '';

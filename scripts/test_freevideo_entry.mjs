@@ -8,7 +8,7 @@ class Element {
     constructor(tag) {
         this.tag = tag; this.children = []; this.dataset = {}; this.attributes = {};
         this.classList = {toggle() {}, add() {}};
-        this.style = {setProperty(name, value) { this[name] = value; }};
+        this.style = {setProperty(name, value) { this[name] = value; }}; this.offsetHeight = 66;
     }
     append(...children) { this.children.push(...children); }
     prepend(...children) { this.children.unshift(...children); }
@@ -17,6 +17,7 @@ class Element {
     removeAttribute(name) { delete this.attributes[name]; }
     querySelector() { return null; }
     querySelectorAll() { return []; }
+    getClientRects() { return this.unrendered ? [] : [{}]; }
     get childElementCount() { return this.children.length; }
     click() { this.clicked = true; }
 }
@@ -46,11 +47,13 @@ test('main browser entry registers both views and preserves node hooks', async t
             progressView = {element: new Element('progress'), stall: new Element('stall'), report: new Element('report'),
                 updateReport() {}, update() {}, hide() {}, dispose() {}, noticeCount: () => 0,
                 stallShown: () => !progressView.stall.hidden, percentShown: () => progressView.percent !== false};
-            progressView.stall.hidden = true;
+            progressView.stall.hidden = true; progressView.report.hidden = true;
             return progressView;
         },
         referenceTrimText: row => `trimmed ${row.kind} ${row.number}`,
         thermalText: thermal => `thermal ${thermal.sm_clock_mean_mhz}`,
+        encoderFileText: file => `encoder ${file.sizes.join(' / ')} GiB`,
+        encoderFilePath: file => file?.offline_installation ? file.path || '' : '',
         createProgressConnection: () => ({start() {}, refresh() {}, reset() {}}),
         notifyCompatibility: async () => { compatibilityChecks++; },
         startUpdateChecks: () => { updateChecks++; },
@@ -63,6 +66,7 @@ test('main browser entry registers both views and preserves node hooks', async t
     const previous = new Map();
     for (const [name, value] of Object.entries({
         document, navigator: {language: 'en'}, window: events,
+        getComputedStyle: element => ({marginTop: '8px', marginBottom: '8px', display: element.hidden ? 'none' : 'block', ...element.style}),
         CustomEvent: class extends Event { constructor(name, options) { super(name); this.detail = options?.detail; } },
         requestAnimationFrame: callback => callback(), __freevideoEntryTest: dependencies,
     })) {
@@ -76,7 +80,7 @@ test('main browser entry registers both views and preserves node hooks', async t
             .replace('import { app } from "../../scripts/app.js";', 'const {app} = globalThis.__freevideoEntryTest;')
             .replace('import { api } from "../../scripts/api.js";', 'const {api} = globalThis.__freevideoEntryTest;')
             .replace("import { openStudio, loraPanel, loraWarning, promptGuide } from \"./studio.js\";", 'const {openStudio,loraPanel,loraWarning,promptGuide} = globalThis.__freevideoEntryTest;')
-            .replace("import { createGenerationProgress, referenceTrimText, thermalText } from './generation_progress.js';", 'const {createGenerationProgress,referenceTrimText,thermalText} = globalThis.__freevideoEntryTest;')
+            .replace("import { createGenerationProgress, referenceTrimText, thermalText, encoderFileText, encoderFilePath } from './generation_progress.js';", 'const {createGenerationProgress,referenceTrimText,thermalText,encoderFileText,encoderFilePath} = globalThis.__freevideoEntryTest;')
             .replace("import { createProgressConnection } from './progress_connection.js';", 'const {createProgressConnection} = globalThis.__freevideoEntryTest;')
             .replace("import { notifyCompatibility } from './compatibility.js';", 'const {notifyCompatibility} = globalThis.__freevideoEntryTest;')
             .replace("import { startUpdateChecks } from './updates.js';", 'const {startUpdateChecks} = globalThis.__freevideoEntryTest;')
@@ -165,10 +169,17 @@ test('main browser entry registers both views and preserves node hooks', async t
         assert.equal(links[0].href, '/freevideo/library/download?' + new URLSearchParams({id: '2026-10-03/'+'1'.repeat(32)}));
         assert.equal(links[0].download, '', 'Use the server filename instead of video.mp4');
         assert.match(links[1].href, /^\/view\?/);
-        node.freevideoShowResult({freevideo_summary: [{video, result_cache_hit: true, sample_seconds: 99}]});
+        const encoder_file = {bytes: 27141342152, expected_bytes: 15687142551, sizes: ['25.3', '14.6'],
+            launcher: true, offline_installation: false};
+        const resultWidth = node.size[0];
+        node.setSize([resultWidth, 100]);
+        node.freevideoShowResult({freevideo_summary: [{video, result_cache_hit: true, sample_seconds: 99, encoder_file}]});
         const reused = node.dom.find(row => row.name === 'freevideo_result').element;
         assert.equal(reused.children[0].hidden, true, 'Do not show the old sampling time as current work');
         assert.ok(reused.children[1].children.some(e => e.textContent === 'Reused previous result'));
+        assert.ok(reused.children.some(e => e.className === 'fv-note' && e.textContent === 'encoder 25.3 / 14.6 GiB'),
+            'A cached result still came from the same encoder file');
+        assert.deepEqual(node.size, [resultWidth, node.computeSize()[1]], 'Grow the node after appending the encoder notice');
         const again = reused.children[1].children.at(-1);
         assert.equal(again.textContent, 'Regenerate');
         let submitted;
@@ -182,12 +193,63 @@ test('main browser entry registers both views and preserves node hooks', async t
         node.freevideoShowProgress({label: 'Preparing video', new_request: true, reset: true});
         assert.ok(!reused.children.some(e => ['fv-stats', 'fv-links'].includes(e.className)),
             'The new video must not display the previous result statistics or downloads');
+        const progressHeight = node.size[1];
         node.freevideoShowResult({freevideo_summary: [{video, sample_seconds: 5}]});
         assert.equal(reused.children[0].hidden, false, 'Show statistics again only for a completed result');
-        node.freevideoShowResult({freevideo_summary: [{video, sample_seconds: 5,
+        assert.ok(!reused.children.some(e => e.textContent === 'encoder 25.3 / 14.6 GiB'), 'Clear the previous encoder notice');
+        assert.ok(node.computeSize()[1] < progressHeight);
+        assert.deepEqual(node.size, [resultWidth, progressHeight], 'Shorter results must not shrink the node');
+        node.freevideoShowResult({freevideo_summary: [{video, sample_seconds: 5, encoder_file, thermal: {sm_clock_mean_mhz: 900},
             reference_trims: [{kind: 'video', number: 1, seconds: 20.3, used_seconds: 5.17}]}]});
         assert.deepEqual(reused.children.filter(e => e.className === 'fv-note fv-trim-note').map(e => e.textContent),
             ['trimmed video 1'], 'Say which reference was shortened, never cut silently');
+        assert.deepEqual(reused.children.filter(e => e.className === 'fv-note' && !e.hidden).map(e => e.textContent),
+            ['thermal 900', 'encoder 25.3 / 14.6 GiB'], 'Show the encoder notice after the thermal notice');
+        assert.ok(node.computeSize()[1] > progressHeight);
+        assert.deepEqual(node.size, [resultWidth, node.computeSize()[1]], 'Measure the result height after all notices are appended');
+
+        await t.test('result widget measures all visible content and keeps other state heights', () => {
+            const node = new GenerateNode(); node.onNodeCreated();
+            const {element, options} = node.dom.find(row => row.name === 'freevideo_result');
+            element.style = {paddingTop: '11px', paddingBottom: '17px', borderTopWidth: '1px', borderBottomWidth: '2px'};
+            assert.equal(options.margin, 10);
+            assert.equal(options.getMinHeight(), 140);
+            node.freevideoShowResult({freevideo_summary: [{video}]});
+            assert.equal(options.getMinHeight(), 215, 'Measure statistics, actions, margins, padding and borders');
+            element.children[1].offsetHeight = 101;
+            element.children[1].style = {marginTop: '3px', marginBottom: '5px'};
+            assert.equal(options.getMinHeight(), 242, 'Wrapped actions contribute their actual height');
+            node.freevideoShowResult({freevideo_summary: [{video, encoder_file}]});
+            assert.equal(options.getMinHeight(), 297, 'Include the notice and both margins');
+            assert.equal(options.getMaxHeight(), options.getMinHeight());
+            element.unrendered = true;
+            assert.equal(options.getMinHeight(), 180, 'Estimate the notices while the canvas is hidden');
+            element.unrendered = false;
+            node.freevideoShowResult({freevideo_summary: [{video, encoder_file, result_cache_hit: true}]});
+            assert.equal(options.getMinHeight(), 215, 'Hidden statistics do not reserve height or margins');
+            const path = String.raw`D:\FreeVideo models\文本编码器.safetensors`;
+            node.freevideoShowResult({freevideo_summary: [{video, encoder_file: {...encoder_file, offline_installation: true, path}}]});
+            const note = element.children.find(e => e.className === 'fv-note' && !e.hidden);
+            assert.equal(note.children[0].className, 'fv-encoder-path');
+            assert.equal(note.children[0].textContent, path, 'Keep the selectable path separate and unchanged');
+            note.offsetHeight = 112;
+            assert.equal(options.getMinHeight(), 343, 'Include the wrapped path in its note height');
+            node.freevideoShowResult({freevideo_summary: [{video, encoder_file: {...encoder_file, offline_installation: true}}]});
+            assert.equal(element.children.find(e => e.className === 'fv-note' && !e.hidden).children.length, 0,
+                'A library result without a path has no path line');
+            node.freevideoShowResult({freevideo_summary: [{video}]});
+            assert.equal(options.getMinHeight(), 215, 'Replacing a result clears its measured notices');
+            node.freevideoShowResult({freevideo_summary: [{video, encoder_file}]});
+            node.freevideoShowProgress({label: 'Preparing video', new_request: true, reset: true});
+            assert.equal(options.getMinHeight(), 330, 'Progress keeps its existing height');
+            node.freevideoStopProgress();
+            assert.equal(options.getMinHeight(), 140, 'Clearing a result drops its notice height');
+            node.freevideoShowFailure({exception_message: 'Failed'});
+            assert.equal(options.getMinHeight(), 420, 'Failure keeps its existing height');
+            node.freevideoShowResult({freevideo_summary: [{video, low_memory: true, thermal: {sm_clock_mean_mhz: 900},
+                reference_trims: [{kind: 'video', number: 1}]}]});
+            assert.equal(options.getMinHeight(), 461, 'Measure memory, thermal and reference trim notices');
+        });
 
         class MediaNode extends GenerateNode {
             constructor() {

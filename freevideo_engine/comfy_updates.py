@@ -106,8 +106,7 @@ class UpdateStatus:
                     or launcher_update.build_target(candidate) != launcher_update.build_target(self.current)
                     or launcher_update.build_track(candidate) != track):
                 raise ValueError('Update belongs to a different platform')
-            newer = (candidate['built_at'] > self.current['built_at']
-                     and candidate['revision'] != self.current['revision'])
+            newer = launcher_update.newer(candidate, self.current)
             available = public_details(candidate) if newer else None
             with self.lock:
                 self.state.update(status='available' if available else 'current', available=available)

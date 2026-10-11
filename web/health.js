@@ -1,7 +1,10 @@
 // Checks that FreeVideo's page loaded completely and says what is wrong when
-// it did not: which file, why, and what to do. It imports nothing and styles
-// itself inline, so it still runs when every other FreeVideo file fails.
+// it did not: which file, why, and what to do. It imports nothing at load and
+// styles itself inline, so it still runs when every other FreeVideo file fails.
 // Other FreeVideo files report through `window.__freevideoHealth.push(...)`.
+// The shared browser-extension check and error advice load only once the page
+// check runs, after the listeners are installed; each may fail on its own.
+let extensionUI = null, errorUI = null;
 const base = new URL('./', import.meta.url);
 const query = new URLSearchParams(location.search);
 const language = query.get('freevideo_lang');
@@ -10,7 +13,7 @@ const t = (en, zh) => cn ? zh : en;
 // launcher.js removes this flag during setup; read it before that.
 const launchVisit = query.get('freevideo') === 'launch';
 // Every script this folder ships; a test keeps the list in step with web/*.js.
-export const MODULES = ['compatibility.js', 'error_panel.js', 'fonts.js', 'freevideo.js', 'generation_progress.js',
+export const MODULES = ['browser_extension.js', 'compatibility.js', 'error_panel.js', 'fonts.js', 'freevideo.js', 'generation_progress.js',
     'health.js', 'image_editor.js', 'image_editor_engine.js', 'launcher.js', 'library.js', 'motion.js', 'output_download.js', 'port_notice.js', 'preview_scene.js',
     'progress_connection.js', 'prompt_draft.js', 'prompt_enhance.js', 'prompt_references.js', 'report_issue.js', 'studio_recent.js',
     'result_actions.js', 'sampling_effort.js', 'setup.js', 'share.js', 'studio.js', 'studio_queue.js',
@@ -36,7 +39,14 @@ const ours = url => typeof url === 'string' && url.startsWith(base.href);
 // ComfyUI that name the extension or file that failed.
 const seen = [];
 const note = (kind, text, extra = {}) => { if (seen.length < 60) seen.push({kind, text: String(text).slice(0, 500), ...extra}); };
-const describe = value => value instanceof Error ? `${value.name}: ${value.message}`
+// Browser-extension frames without query or fragment, and user scripts by file
+// name only: enough to name the culprit, never a private URL, path or token.
+const extensionFrames = text => [...new Set(String(text || '').match(
+    /(?:chrome|moz|safari-web)-extension:\/\/[^\s)?#'"]+|[^\s()'"?#/\\]+\.user\.js\b|ERR_BLOCKED_BY_CLIENT/gi) || [])].slice(0, 5);
+// Recent extension evidence for the shared check, kept apart from what is
+// reported and timed so an old console error cannot explain a later failure.
+const extensionSeen = [];
+const describe = value => value instanceof Error ? [`${value.name}: ${value.message}`, ...extensionFrames(value.stack)].join('\n')
     : value && typeof value === 'object' && value.error instanceof Error ? describe(value.error)
     : typeof value === 'string' ? value : (() => { try { return JSON.stringify(value); } catch { return String(value); } })();
 const consoleError = console.error;
@@ -64,8 +74,14 @@ function install() {
     console.error = function (...args) {
         try {
             const text = args.map(describe).join(' ');
+            const frames = extensionFrames(text);
+            if (frames.length) {
+                extensionSeen.push({at: Date.now(), text: frames.join('\n')});
+                if (extensionSeen.length > 20) extensionSeen.shift();
+            }
             if (/Error loading extension|Error calling extension|already registered|Failed to fetch dynamically imported module|does not provide an export/i.test(text)
                 || text.includes(base.pathname)) note('console', text);
+            else if (frames.length) note('console', frames.join('\n'));
         } catch { /* Never interfere with the page's own logging. */ }
         return consoleError.apply(this, args);
     };
@@ -93,7 +109,7 @@ async function probe(url) {
         const response = await fetch(url, {cache: 'no-store'});
         return {status: response.status, ok: response.ok, type: (response.headers.get('content-type') || '').split(';')[0].trim()};
     } catch (error) {
-        return {status: 0, ok: false, type: '', error: describe(error)};
+        return {status: 0, ok: false, type: '', error: describe(error), exception: error};
     }
 }
 
@@ -115,8 +131,6 @@ const ADVICE = {
     cache: t('FreeVideo already reloaded this page once with fresh copies of its files. Press Ctrl+F5. If it still fails, turn off browser extensions that block scripts on this page or open the same address in another browser. If that does not help, copy the details and submit them in a GitHub issue; we will look into it and work on a fix for you.',
         'FreeVideo 已经用重新下载的文件自动刷新过一次页面。请按 Ctrl+F5 强制刷新；仍然出现时，请停用会拦截此页面脚本的浏览器插件，或换一个浏览器打开同一地址。仍未解决时，请复制详情并提交到 GitHub issue，我们会专门排查，为您解决这个问题。'),
     relaunch: t('Click Start in the FreeVideo launcher again.', '请在 FreeVideo 启动器里重新点击“启动”。'),
-    blocked: t(`This is usually an ad blocker. Allow ${location.hostname} in it (uBlock Origin, AdGuard and Adblock Plus can all be turned off for this site), then reload the page.`,
-        `通常是广告拦截插件所致。请在插件里允许 ${location.hostname}（uBlock Origin、AdGuard、Adblock Plus 都可以对当前网站停用拦截），然后刷新页面。`),
 };
 
 // Requests url the way a script (modulepreload) or a stylesheet (preload) is
@@ -182,7 +196,7 @@ async function diagnoseModules() {
         if (!result.ok) {
             found.push({text: result.status
                 ? t(`Script ${name} could not be loaded: the server answered HTTP ${result.status}.`, `脚本 ${name} 无法加载：服务器返回 HTTP ${result.status}。`)
-                : t(`Script ${name} could not be loaded: ${result.error}.`, `脚本 ${name} 无法加载：${result.error}。`), advice: 'files'});
+                : t(`Script ${name} could not be loaded: ${result.error}.`, `脚本 ${name} 无法加载：${result.error}。`), advice: 'files', error: result.exception});
         } else if (!/javascript|ecmascript/i.test(result.type)) {
             found.push({text: t(`Script ${name} was refused: the server sent it as “${result.type || 'no type'}”.`,
                 `脚本 ${name} 被浏览器拒绝：服务器发送的类型是“${result.type || '未标明'}”。`), advice: 'type'});
@@ -257,7 +271,7 @@ async function diagnoseStyles() {
         const name = fileName(link.href), result = await probe(link.href);
         found.push(!result.ok
             ? {text: t(`Stylesheet ${name} could not be loaded: ${result.status ? `HTTP ${result.status}` : result.error}.`,
-                `样式文件 ${name} 无法加载：${result.status ? `HTTP ${result.status}` : result.error}。`), advice: 'files'}
+                `样式文件 ${name} 无法加载：${result.status ? `HTTP ${result.status}` : result.error}。`), advice: 'files', error: result.exception}
             : result.type !== 'text/css'
                 ? {text: t(`Stylesheet ${name} was refused: the server sent it as “${result.type || 'no type'}”.`,
                     `样式文件 ${name} 被浏览器拒绝：服务器发送的类型是“${result.type || '未标明'}”。`), advice: 'type'}
@@ -381,7 +395,27 @@ function reportText(item) {
         progress: t('Live progress could not start', '生成进度无法更新'),
         updates: t('Update checks could not start', '更新检查无法启动'),
         launch: t('The FreeVideo workflow did not open', 'FreeVideo 工作流没有打开')}[item.where] || t('FreeVideo reported an error', 'FreeVideo 报错');
-    return {text: `${where}${cn ? '：' : ': '}${describe(item.error)}`, advice: item.where === 'launch' ? 'relaunch' : 'reload'};
+    return {text: `${where}${cn ? '：' : ': '}${describe(item.error)}`, error: item.error, advice: item.where === 'launch' ? 'relaunch' : 'reload'};
+}
+
+function extensionProblem(problem) {
+    if (!extensionUI) return null;
+    // Preserve the same known engine causes as the execution/queue cards.
+    // A missing error-panel module must not disable this page check itself.
+    if (problem.advice !== 'blocked' && errorUI) {
+        const cause = errorUI.failureAdvice(errorUI.errorText(problem.error || problem.text), t,
+            problem.error?.known_error ?? errorUI.createErrorReport(problem.error || problem.text).known_error);
+        if (cause.kind !== 'unknown') return null;
+    }
+    const kind = problem.advice === 'blocked' ? 'blocked'
+        : ['reload', 'cache', 'relaunch', 'plugin'].includes(problem.advice) ? 'unknown'
+        : extensionUI.isNetworkTypeError(problem.error) ? 'network' : problem.advice;
+    const options = {kind, blocked: problem.advice === 'blocked'};
+    // blockedAs tells us a resource was stopped, not which extension did it.
+    if (options.blocked) return extensionUI.detectBrowserExtension('', {...options, logs: []});
+    const logs = extensionSeen.filter(row => Date.now() - row.at < 10000).map(row => row.text);
+    return extensionUI.detectBrowserExtension(problem.error || problem.text, {...options, logs})
+        || extensionUI.detectBrowserExtension(problem.error || problem.text, options);
 }
 
 const distinct = problems => problems.filter((problem, index) => problems.findIndex(other => other.text === problem.text) === index);
@@ -428,7 +462,10 @@ function show(problems) {
         border: '1px solid #5a3440', boxShadow: '0 18px 48px rgba(0,0,0,.45)',
         font: '13px/1.55 "Segoe UI","Microsoft YaHei UI","Noto Sans CJK SC","Noto Sans SC",system-ui,sans-serif'});
     const title = document.createElement('div');
-    title.textContent = t('FreeVideo did not load completely', 'FreeVideo 没有完整加载');
+    const extension = problems.map(extensionProblem).find(Boolean);
+    const extensionAdvice = extension && extensionUI.browserExtensionAdvice(extension, t,
+        {blocked: problems.some(p => p.advice === 'blocked')});
+    title.textContent = extensionAdvice?.title || t('FreeVideo did not load completely', 'FreeVideo 没有完整加载');
     Object.assign(title.style, {color: '#f09aa2', fontWeight: '600', fontSize: '16px', marginBottom: '8px'});
     const list = document.createElement('ul');
     Object.assign(list.style, {margin: '0 0 10px', paddingLeft: '18px'});
@@ -438,7 +475,7 @@ function show(problems) {
         list.append(row);
     }
     const advice = document.createElement('div');
-    const adviceText = [...new Set(problems.map(p => ADVICE[p.advice] || ADVICE.reload))].join(' ');
+    const adviceText = [...new Set(problems.filter(p => !extensionProblem(p)).map(p => ADVICE[p.advice] || ADVICE.reload))].join(' ');
     for (const [index, text] of adviceText.split('GitHub issue').entries()) {
         if (index) {
             const link = document.createElement('a');
@@ -460,7 +497,8 @@ function show(problems) {
         actions.append(button); return button;
     };
     action(t('Reload page', '刷新页面'), () => location.reload(), true);
-    const copy = action(t('Copy details', '复制详情'), async () => {
+    // The extension card's steps end with a reload; its copy button matches the other error cards.
+    const copy = action(extensionAdvice ? t('Copy error', '复制错误') : t('Copy details', '复制详情'), async () => {
         const text = details(problems);
         try { await navigator.clipboard.writeText(text); } catch {
             const area = document.createElement('textarea'); area.value = text; document.body.append(area); area.select();
@@ -469,7 +507,15 @@ function show(problems) {
         copy.textContent = t('Copied', '已复制');
     });
     action(t('Close', '关闭'), () => { card?.remove(); card = null; });
-    card.append(title, list, advice, actions);
+    if (extensionAdvice) {
+        const first = document.createElement('p'); first.textContent = extensionAdvice.summary;
+        const choose = document.createElement('p'); choose.textContent = extensionAdvice.action;
+        const technical = document.createElement('details'), label = document.createElement('summary');
+        label.textContent = t('Technical details', '技术详情'); technical.append(label, list);
+        technical.style.margin = '12px 0';
+        // Full URLs/IDs and the blocked filename remain in technical details.
+        card.append(title, first, choose, extensionUI.extensionSteps(extensionAdvice), technical, advice, actions);
+    } else card.append(title, list, advice, actions);
     document.body.append(card);
     if (typeof card.showPopover === 'function') {
         card.popover = 'manual';
@@ -509,6 +555,8 @@ function send(state, problems) {
 }
 
 async function check() {
+    [extensionUI, errorUI] = await Promise.all([import('./browser_extension.js').catch(() => null),
+        import('./error_panel.js').catch(() => null)]);
     send('loading', []);
     const app = await waitFor(comfy, 60000);
     if (!app) {
@@ -527,7 +575,7 @@ async function check() {
     const ui = window.FreeVideoUI || {};
     if (!ui.ready) {
         problems.push(...await diagnoseModules());
-        if (problems.length && problems.every(p => p.retry) && await reloadOnce(problems)) return;
+        if (problems.length && problems.every(p => p.retry && !extensionProblem(p)) && await reloadOnce(problems)) return;
     }
     if (!ui.ready && !problems.length) problems.push({text: t('FreeVideo’s scripts loaded, but ComfyUI did not start them.', 'FreeVideo 的脚本已下载，但 ComfyUI 没有启动它们。'), advice: 'reload'});
     if (!problems.length) problems.push(...await diagnoseStyles());
