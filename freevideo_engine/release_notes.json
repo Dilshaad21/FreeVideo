@@ -11,7 +11,7 @@
       "Repair also restores ComfyUI packages whose files were deleted or changed, and replaces model files that differ from the tested version, keeping the original under a new name. When the text encoder folder holds a same-named file of a different size, generation uses the tested one.",
       "FreeVideo installed from an offline package now updates its engine with the launcher without downloading; an older launcher no longer overwrites a newer FreeVideo, and both versions are shown when they differ.",
       "When a browser extension interferes with FreeVideo, the error card names the extension and lists ways to fix it.",
-      "View licenses in the license step lists each license you accept, and the full texts open without a connection.",
+      "View licenses in the license step lists each license you accept, and each one opens; in installations from an offline package the full texts open from this computer, without a connection.",
       "Fixes: after an engine update, commands run with the engine's own Python use the new FreeVideo; on Linux, Install / repair completes when the uv tool in the installation folder is a link to another location."
     ]
   },
@@ -25,7 +25,7 @@
       "“修复”也会补回 ComfyUI 环境里被删除或改动的包，并把和测试版本不同的模型文件改名保留、换回测试过的版本。生成时如果文本编码器目录里有同名但大小不同的文件，会改用测试过的那份。",
       "用离线整合包装的 FreeVideo 也会随启动器更新引擎，不用下载；旧启动器不再覆盖新版 FreeVideo，两者版本不同时会分别显示。",
       "浏览器扩展干扰 FreeVideo 时，出错卡片会写出是哪个扩展，并给出解决办法。",
-      "许可确认里的“查看许可证”会列出要同意的每一项许可，断网也能打开全文。",
+      "许可确认里的“查看许可证”会列出要同意的每一项许可，每项都能打开；用离线整合包安装时打开的是本机全文，断网也能看。",
       "修复：引擎更新后，用引擎自带 Python 运行的命令也会用新版 FreeVideo；Linux 上安装目录里的 uv 被换成链接时，“安装 / 修复”也能完成。"
     ]
   },
