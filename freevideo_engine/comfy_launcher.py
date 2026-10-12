@@ -9,6 +9,7 @@ import traceback
 import webbrowser
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from .long_paths import io_path, resolved, plain, plain_text, plain_errors
 from . import __version__
 from . import branding
 from .comfy_launcher_runtime import Controller
@@ -245,6 +246,7 @@ class Launcher:
         for widget in self.options_inputs:
             widget.state(['disabled'] if self.controller.busy else ['!disabled'])
 
+    @plain_errors
     def download_settings(self):
         from .download_settings import Probe
         from .download_settings_ui import DownloadSettings
@@ -254,7 +256,7 @@ class Launcher:
             root = Path(selected['engine']) if selected else self.compatibility_root()
             if root is None:
                 raise ValueError(self.t('Choose the installation folder first.', '请先选择安装位置。'))
-            root = root.resolve()
+            root = Path(plain(resolved(root)))
             old = self.download_dialog
             if old and old.window.winfo_exists():
                 if old.root == root:
@@ -264,7 +266,7 @@ class Launcher:
             self.download_dialog = DownloadSettings(self.window, root, self.zh, probe,
                 token=self.token, busy=lambda: self.controller.busy)
         except (OSError, ValueError) as error:
-            messagebox.showerror('FreeVideo', str(error), parent=self.window)
+            messagebox.showerror('FreeVideo', plain_text(error), parent=self.window)
 
     def compatibility_root(self):
         if self.engine.get().strip():
@@ -290,12 +292,13 @@ class Launcher:
         from tkinter import messagebox
         try:
             root = self.compatibility_root()
-            if root is None or not (root/'machine.json').is_file():
+            if root is None or not (io_path(root)/'machine.json').is_file():
                 raise ValueError(self.t('Choose an installed FreeVideo engine first.', '请先选择已安装的 FreeVideo 引擎。'))
             open_settings(self.window, root, self.zh)
         except (OSError, ValueError) as error:
-            messagebox.showerror('FreeVideo', str(error), parent=self.window)
+            messagebox.showerror('FreeVideo', plain_text(error), parent=self.window)
 
+    @plain_errors
     def save_settings(self):
         if self.save_timer is not None:
             self.window.after_cancel(self.save_timer)
@@ -307,7 +310,7 @@ class Launcher:
                 from .comfy_launcher_runtime import local_url
                 try:
                     selected['url'] = local_url(self.url.get())
-                    if self.python.get() and Path(self.python.get()).is_file():
+                    if self.python.get() and io_path(self.python.get()).is_file():
                         selected['python'] = self.python.get()
                 except ValueError:
                     pass  # Keep an editable draft without breaking the saved launcher.
@@ -756,11 +759,12 @@ class Launcher:
                     pass
                 setattr(self, name, None)
 
+    @plain_errors
     def callback_error(self, kind, value, trace):
         path = launcher_root() / 'errors' / ('launcher-' + str(time.time_ns()) + '.log')
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(''.join(traceback.format_exception(kind, value, trace)), encoding='utf-8')
-        self.status.set(str(value))
+        io_path(path.parent).mkdir(parents=True, exist_ok=True)
+        io_path(path).write_text(plain_text(''.join(traceback.format_exception(kind, value, trace))), encoding='utf-8')
+        self.status.set(plain_text(value))
 
 
 def legacy_main():

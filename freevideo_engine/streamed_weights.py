@@ -70,6 +70,22 @@ def interleaved_layer_order(count):
     return order
 
 
+def spread_layer_order(count):
+    """Layers ordered so that any first part and any last part lie spread out.
+
+    Loading keeps streamed layers in RAM in this order until RAM runs out, so
+    the layers left on the drive are apart from each other wherever it stops,
+    and each can be read while the layers between them compute. Kept in index
+    order they were the last layers of the model, one after another, and the
+    drive stood idle through the rest of every step. Reversing the bits of
+    the index gives the order: 0, then the middle, then the quarters.
+    """
+    if type(count) is not int or count < 0:
+        raise ValueError('Layer count must be a non-negative integer')
+    bits = max(1, (count - 1).bit_length())
+    return sorted(range(count), key=lambda index: int(format(index, f'0{bits}b')[::-1], 2))
+
+
 def release_file_pages(paths):
     """Advise away consumed clean pages; never remove or rewrite a weight file."""
     import os
@@ -389,6 +405,9 @@ class SafetensorLayers:
         self.cache_lock = threading.Lock()
         self.read_stats = dict(kept_layers=0, kept_bytes=0, kept_seconds=0.,
                                passed_layers=0, passed_bytes=0, passed_seconds=0.)
+        # A read from the drive has kept the inference thread waiting; the
+        # offloader then reads drive-backed layers further ahead (offload.py).
+        self.reads_delay_compute = False
         for path in sorted(set(Path(p).resolve() for p in paths)):
             self.files[path] = self.identity(path)
             with _open_safetensors(path, framework='np') as handle:
@@ -485,8 +504,9 @@ class SafetensorLayers:
             finally:
                 for path in reads:
                     self.check(path)
-            self.host_view_hits += 1
-            self.host_view_hit_bytes += size
+            with self.cache_lock:
+                self.host_view_hits += 1
+                self.host_view_hit_bytes += size
             del entry, views
             if not host_view_fits(0, HOST_VIEW_SHED):
                 self._release(index)
@@ -718,19 +738,21 @@ class SafetensorLayers:
         # streamed reads recycle the standby list.
         for source in views.values():
             source[::mmap.PAGESIZE].sum()
-        self.host_views[index] = (views, mappings, size)
-        self.host_view_bytes += size
+        with self.cache_lock:
+            self.host_views[index] = (views, mappings, size)
+            self.host_view_bytes += size
 
     def _release(self, index):
-        views, mappings, size = self.host_views.pop(index)
+        with self.cache_lock:
+            views, mappings, size = self.host_views.pop(index)
+            self.host_view_bytes -= size
+            self.host_view_released += 1
         del views
         for mapping in mappings:
             try:
                 mapping.close()
             except BufferError:
                 pass  # A tensor view is still referenced; the mapping closes when it is collected.
-        self.host_view_bytes -= size
-        self.host_view_released += 1
 
     def release_host_views(self):
         for index in list(self.host_views or ()):

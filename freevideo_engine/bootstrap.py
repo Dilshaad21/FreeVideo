@@ -21,6 +21,7 @@ import urllib.request
 import zipfile
 from urllib.parse import unquote, urlsplit
 
+from . import execution_paths
 from .hardware import Hardware, GiB, cgroup_capacity
 from . import __version__
 from .policy import resource_budget
@@ -34,6 +35,7 @@ from . import disk_space
 from . import network
 from . import processes
 from .system import install_root, venv_python, system_memory, nvidia_smi, memory_sample, curl_executable, missing_curl_message
+from .system import inference_headroom
 
 PACKAGE = Path(__file__).resolve().parent
 SOURCE = PACKAGE.parent
@@ -61,8 +63,9 @@ def _permission_limited_memory_sample(row):
     return all(type(error) is dict and error.get('winerror') == 5 for error in errors)
 
 
-def setup_memory_status(row, verbose=False):
-    available = row.get('effective_available_bytes', row['system_available_bytes'])
+def setup_memory_status(row, verbose=False, *, system=None):
+    available = (inference_headroom(row) if (system or platform.system()) == 'Linux'
+                 else row.get('effective_available_bytes', row['system_available_bytes']))
     if memory_sample(row) is None:
         if row.get('monitor_status') == 'degraded':
             return 'Process RAM partially unavailable · %.1f GiB available · continuing with system floor' % (available/GiB)
@@ -88,11 +91,13 @@ def setup_memory_pressure(row, budget, system):
     The budget already excludes the OS reserve. Model SDKs additionally
     switch to bounded streaming below 2 GiB; stopping the whole installer at
     that same threshold prevented the low-memory path from continuing.
-    Linux retains its existing container/cache floor.
+    Linux uses inference's clean-file-cache headroom, retaining the 1 GiB
+    floor and the separate process budget. Raw cgroup charges remain recorded.
     """
     reserve = (2 if system == 'Windows' else 1) * GiB
     floor = min(256 * 2**20, int(budget * .05)) if system == 'Windows' else reserve
-    available = row.get('effective_available_bytes', row['system_available_bytes'])
+    available = (inference_headroom(row) if system == 'Linux'
+                 else row.get('effective_available_bytes', row['system_available_bytes']))
     commit = row.get('system_commit_available_bytes')
     used = memory_sample(row)
     reasons = []
@@ -206,7 +211,7 @@ def dependency_status(root, layout='unified', system=None):
         if python.exists():
             code = ('import importlib.metadata as m,json; '
                     'print(json.dumps({d.metadata["Name"].lower().replace("_","-"):d.version for d in m.distributions()}))')
-            check = subprocess.run([str(python), '-B', '-c', code], capture_output=True, text=True)
+            check = execution_paths.run([str(python), '-B', '-c', code], capture_output=True, text=True)
             if check.returncode:
                 row['error'] = check.stderr[-1000:]
             else:
@@ -286,7 +291,7 @@ def inventory(gpu=None):
         # Unknown must not be presented as an unsupported old GPU architecture.
         capability = (0, 0)
     ram = system_memory()
-    limit, available = cgroup_capacity()
+    limit, available = cgroup_capacity(include_reclaimable=True)
     hardware = Hardware(selected['name'], capability,
         int(float(selected['memory.total']) * 2**20), int(float(selected['memory.free']) * 2**20),
         ram['total_bytes'], min(ram['available_bytes'], available) if available is not None else ram['available_bytes'],
@@ -1172,7 +1177,7 @@ class Installer:
                         row['installation_guard'] = pressure
                         stream.write(json.dumps(dict(row, elapsed_seconds=time.monotonic()-self.started, epoch_seconds=time.time())) + '\n')
                         available = pressure['available_bytes']
-                        self.ui.resource = setup_memory_status(row, self.ui.verbose)
+                        self.ui.resource = setup_memory_status(row, self.ui.verbose, system=self.system)
                         # Windows helpers can exit/change while their tree is
                         # sampled. Allow two resamples, while checking the live
                         # exhaustion floor on every attempt. The larger planning
@@ -1459,13 +1464,13 @@ class Installer:
         # and unpack another copy. Existing installations keep their own base.
         if prepared.is_dir() and not any(current.glob('cpython-' + self.versions['python'] + '-*')):
             env = dict(self.env, UV_PYTHON_INSTALL_DIR=str(prepared))
-            found = subprocess.run([str(uv), '--no-config', 'python', 'find', '--managed-python',
+            found = execution_paths.run([str(uv), '--no-config', 'python', 'find', '--managed-python',
                                     '--no-python-downloads', self.versions['python']],
                                    env=env, capture_output=True, text=True, timeout=30)
             if found.returncode == 0:
                 candidate = Path(found.stdout.strip())
                 if candidate.is_file() and candidate.resolve().is_relative_to(prepared.resolve()):
-                    check = subprocess.run([str(candidate), '-I', '-B', '-c',
+                    check = execution_paths.run([str(candidate), '-I', '-B', '-c',
                         'import platform; print(platform.python_version())'], capture_output=True, text=True, timeout=30)
                     if check.returncode == 0 and check.stdout.strip() == self.versions['python']:
                         self.env['UV_PYTHON_INSTALL_DIR'] = str(prepared)
@@ -1988,7 +1993,7 @@ def main(argv=None):
             from .curl_windows import ensure
             def curl_progress(message):
                 print(json.dumps(message), flush=True)
-            os.environ['FREEVIDEO_CURL'] = ensure(args.root, progress=curl_progress)
+            os.environ['FREEVIDEO_CURL'] = execution_paths.execution_path(ensure(args.root, progress=curl_progress))
         value = plan(args, local_progress=progress_output if os.environ.get('FREEVIDEO_UI_EVENTS') == '1' or not args.json else None)
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         print('Preflight failed: ' + str(error), file=sys.stderr)

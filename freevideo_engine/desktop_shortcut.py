@@ -12,6 +12,7 @@ import sys
 import uuid
 
 from .monitoring import save
+from .long_paths import io_path, resolved, plain, plain_text, plain_error, plain_errors
 from .system import windows
 
 
@@ -19,7 +20,7 @@ def read_build(path):
     """A launcher stamp, or an unknown identity for legacy/unreadable copies."""
     from .launcher_update import build_identity
     try:
-        return build_identity(json.loads(Path(path).read_text(encoding='utf-8')))
+        return build_identity(json.loads(io_path(path).read_text(encoding='utf-8')))
     except (OSError, ValueError, TypeError):
         return {}
 
@@ -170,56 +171,65 @@ def _complete(root, fingerprint, folder):
         return False
 
 
+@plain_errors
 def launcher_target(engine, source, portable_root=None, *, prepare=True):
     if portable_root:
-        target = Path(portable_root) / 'FreeVideo.exe'
+        target = io_path(portable_root) / 'FreeVideo.exe'
         if not target.is_file():
-            raise FileNotFoundError('Bundle launcher is missing: ' + str(target))
+            raise FileNotFoundError('Bundle launcher is missing: ' + plain(target))
+        target = Path(plain(target))
         return target, [], target
     if getattr(sys, 'frozen', False):
-        executable = Path(sys.executable).resolve()
-        from .launcher_update import current_build
-        identity = current_build() or {}
-        folder = identity.get('packaging') == 'onedir'
-        fingerprint = digest(executable)
-        parent = copies_folder(engine, fingerprint)
-        for root in [parent / fingerprint, *sorted(parent.glob(fingerprint + '-*'))]:
-            if _complete(root, fingerprint, folder):
-                return root / 'FreeVideo.exe', [], root / 'FreeVideo.exe'
-        if not prepare:
-            target = parent / fingerprint / 'FreeVideo.exe'
-            return target, [], target
-        parent.mkdir(parents=True, exist_ok=True)
-        # Not tempfile.mkdtemp: since Python 3.12.4 that folder admits only its owner, so a copy
-        # made while running as administrator could not be opened from the shortcut afterwards.
-        stage = parent / ('launcher-' + uuid.uuid4().hex)
-        stage.mkdir()
         try:
-            shutil.copy2(executable, stage / 'FreeVideo.exe')
-            if folder:
-                shutil.copytree(executable.parent / '_internal', stage / '_internal')
-            if digest(stage / 'FreeVideo.exe') != fingerprint:
-                raise OSError('Launcher changed while preparing the desktop shortcut; retry installation')
-            if identity:
-                save(stage / 'launcher-build.json', identity)
-            root = parent / fingerprint
-            if os.path.lexists(root):
-                root = root.with_name(fingerprint + '-' + uuid.uuid4().hex[:8])
-            stage.rename(root)
-        finally:
-            if stage.exists(): shutil.rmtree(stage, ignore_errors=True)  # Every start retries: no partial copies.
-        return root / 'FreeVideo.exe', [], root / 'FreeVideo.exe'
-    python = Path(sys.executable).resolve()
+            executable = resolved(sys.executable)
+            from .launcher_update import current_build
+            identity = current_build() or {}
+            folder = identity.get('packaging') == 'onedir'
+            fingerprint = digest(executable)
+            parent = io_path(copies_folder(engine, fingerprint))
+            for root in [parent / fingerprint, *sorted(parent.glob(fingerprint + '-*'))]:
+                if _complete(root, fingerprint, folder):
+                    target = Path(plain(root / 'FreeVideo.exe'))
+                    return target, [], target
+            if not prepare:
+                target = Path(plain(parent / fingerprint / 'FreeVideo.exe'))
+                return target, [], target
+            parent.mkdir(parents=True, exist_ok=True)
+            # Not tempfile.mkdtemp: since Python 3.12.4 that folder admits only its owner, so a copy
+            # made while running as administrator could not be opened from the shortcut afterwards.
+            stage = parent / ('launcher-' + uuid.uuid4().hex)
+            stage.mkdir()
+            try:
+                shutil.copy2(executable, stage / 'FreeVideo.exe')
+                if folder:
+                    shutil.copytree(executable.parent / '_internal', stage / '_internal')
+                if digest(stage / 'FreeVideo.exe') != fingerprint:
+                    raise OSError('Launcher changed while preparing the desktop shortcut; retry installation')
+                if identity:
+                    save(stage / 'launcher-build.json', identity)
+                root = parent / fingerprint
+                if os.path.lexists(root):
+                    root = root.with_name(fingerprint + '-' + uuid.uuid4().hex[:8])
+                stage.rename(root)
+            finally:
+                if stage.exists(): shutil.rmtree(stage, ignore_errors=True)  # Every start retries: no partial copies.
+            target = Path(plain(root / 'FreeVideo.exe'))
+            return target, [], target
+        except (OSError, ValueError) as error:
+            plain_error(error)
+            raise
+    python = resolved(sys.executable)
     if python.with_name('pythonw.exe').is_file():
         python = python.with_name('pythonw.exe')
     code = "import runpy,sys;sys.path.insert(0,sys.argv[1]);runpy.run_module('freevideo_engine.comfy_launcher',run_name='__main__')"
-    return python, ['-c', code, str(Path(source).resolve())], Path(source) / 'freevideo_engine/assets/icon.ico'
+    return Path(plain(python)), ['-c', code, plain(resolved(source))], Path(plain(source)) / 'freevideo_engine/assets/icon.ico'
 
 
 def _same(first, second):
     return bool(first) and bool(second) and os.path.normcase(str(first)) == os.path.normcase(str(second))
 
 
+@plain_errors
 def _ours(path, entry, target):
     """A shortcut this or an earlier FreeVideo installation wrote, not one of the user's own.
 
@@ -246,7 +256,7 @@ def _ours(path, entry, target):
     if _same(named, target) or _same(named, entry.get('target')):
         return True
     return named.name.lower() == 'freevideo.exe' and (
-        not named.exists() or named.parent.parent.name.lower() in ('application', 'application.noindex'))
+        not io_path(named).exists() or named.parent.parent.name.lower() in ('application', 'application.noindex'))
 
 
 def _starts(path, target):
@@ -475,6 +485,7 @@ def create_linux(engine):
     return result
 
 
+@plain_errors
 def create(engine, source, portable_root=None):
     if not windows():
         if sys.platform == 'darwin':
@@ -484,7 +495,7 @@ def create(engine, source, portable_root=None):
             return create_linux(engine)
         return dict(status='not-applicable')
     engine = Path(engine)
-    receipt = engine / 'launcher/desktop-shortcut.json'
+    receipt = io_path(engine) / 'launcher/desktop-shortcut.json'
     try:
         previous = json.loads(receipt.read_text(encoding='utf-8'))
     except (OSError, ValueError):

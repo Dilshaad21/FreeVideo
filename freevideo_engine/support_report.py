@@ -9,7 +9,7 @@ import sys
 import time
 
 from . import __version__
-from .monitoring import thermal_slowdown
+from .monitoring import OtherPrograms, shared_gpu, thermal_slowdown, worker_gpu
 from .diagnostics import Redactor, is_link, read_bounded
 from .diagnostic_resources import kernel_receipt
 from .monitoring import save
@@ -45,7 +45,7 @@ def code_identity():
                  'backends/mps_delta.py', 'backends/mps_features.py', 'backends/mps_qk.py',
                  'backends/mps_mlx_attention.py', 'backends/mps_vae_encode.py', 'backends/mps_modulation.py',
                  'macos_compute.py', 'macos_decode_tiles.py',
-                 'macos_memory.py', 'macos_process_memory.py',
+                 'macos_memory.py', 'macos_conditions.py', 'macos_process_memory.py',
                  'attention.py', 'refine.py', 'reference_sampler.py', 'adaln.py', 'latent_upscale.py',
                  'media_encoding.py', 'media_conditioning.py', 'encoder_checkpoint.py', 'system.py')
     values = {}
@@ -156,7 +156,8 @@ def summarize(report, engine, encoding):
         hints.append(dict(kind='measured', message='This process exceeded its Windows local video-memory budget during sampling. '
             'Compare the per-step nonlocal memory and latency; this is pressure evidence, not a measured PCIe paging rate.',
             message_zh='采样时进程超过了 Windows 分配的本地显存预算。请对照每步共享内存与耗时；这是压力证据，不是 PCIe 换页速率测量。'))
-    thermal = thermal_slowdown(mapping(mapping(report.get('memory')).get('video')).get('gpu'))
+    gpu = worker_gpu(report)
+    thermal = thermal_slowdown(gpu)
     if thermal:
         hints.append(dict(kind='measured', message='The GPU was in thermal slowdown for %d%% of its busy time: %d of %d MHz on '
             'average%s. Cooling limited this request, not the plan.' % (round(100 * thermal['share']), thermal['sm_clock_mean_mhz'],
@@ -164,6 +165,13 @@ def summarize(report, engine, encoding):
             message_zh='显卡在 %d%% 的计算时间里处于温控降频，平均 %d／%d MHz%s。这次用时受散热限制，不是规划问题。' % (
             round(100 * thermal['share']), thermal['sm_clock_mean_mhz'], thermal['sm_clock_max_mhz'],
             '，%.0f °C' % thermal['temperature_mean_c'] if thermal['temperature_mean_c'] else '')))
+    shared = shared_gpu(gpu)
+    if shared:
+        hints.append(dict(kind='measured', message='Other programs used about %d%% of the GPU while this request was computing, '
+            'and at least %d%% of it for %d%% of that time, so it ran slower than with the GPU to itself.' % (
+            shared['other_mean_percent'], OtherPrograms.share_percent, round(100 * shared['share'])),
+            message_zh='这次请求计算期间，其他程序占用了约 %d%% 的显卡，其中 %d%% 的时间里不低于 %d%%，所以比独占显卡时慢。' % (
+            shared['other_mean_percent'], round(100 * shared['share']), OtherPrograms.share_percent)))
     attempts = report.get('resource_attempts', [])
     failures = [dict(state=r.get('state'), failure=r.get('failure')) for r in attempts
                 if isinstance(r, dict) and r.get('failure')] if isinstance(attempts, list) else []

@@ -319,6 +319,9 @@ def worker(value):
     resource, sampling = value['resources'], value['sampling']
     artifacts, phase = Path(value['artifacts']), value['phase']
     result = dict(success=False, device_backend='mps', phase=phase)
+    if phase == 'decode':
+        from .macos_conditions import runtime_conditions
+        result['conditions'] = [runtime_conditions()]
     started = time.monotonic()
     try:
         sampling_lifetime(resource)
@@ -431,6 +434,10 @@ def worker(value):
         result.update(error_type=type(error).__name__, error_message=str(error), exception=traceback.format_exc())
         raise
     finally:
+        if phase == 'decode':
+            result['conditions'].append(runtime_conditions())
+            if isinstance(result.get('decode'), dict):
+                result['decode']['conditions'] = result['conditions']
         result['worker_seconds'] = time.monotonic() - started
         save(Path(value['report']), result)
 

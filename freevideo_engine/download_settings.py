@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from .monitoring import save
+from .long_paths import io_path, plain
 from .proxy import MODES
 
 CHOICES = ('auto', 'official', 'hf-mirror', 'modelscope')
@@ -25,11 +26,11 @@ def speed_text(row, zh=False):
 
 def read(path):
     try:
-        value=json.loads(Path(path).read_text(encoding='utf-8'))
+        value=json.loads(io_path(path).read_text(encoding='utf-8'))
     except FileNotFoundError:
         return dict(source='auto', proxy_mode='auto')
     if not isinstance(value,dict) or value.get('source') not in CHOICES:
-        raise ValueError('Invalid model download settings: '+str(path))
+        raise ValueError('Invalid model download settings: '+plain(path))
     value.setdefault('proxy_mode', 'auto')
     if value['proxy_mode'] not in MODES:
         raise ValueError('Invalid download connection mode')
@@ -106,7 +107,7 @@ class Probe:
                 try:
                     from . import network
                     from .environments import bootstrap_versions
-                    package=Path(__file__).parent
+                    package=io_path(Path(__file__).parent)
                     spec=json.loads((package/'dependencies.json').read_text())
                     versions=bootstrap_versions(json.loads((package/'bootstrap_versions.json').read_text()))
                     def progress(value):

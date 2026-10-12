@@ -637,9 +637,16 @@ def execute_attempts(history, identity, profile, canvas, launch, *,
                 on_retry(index, row, current, decision)
             continue
         # Failure to commit success must not trigger another GPU attempt.
-        history.finish(attempt, 'success', observation=observation,
+        settled = history.finish(attempt, 'success', observation=observation,
                        details={'reason': 'Complete request, retained output and metrics verified.',
                                 'prediction_error': report.get('resource_prediction_error')})
+        settlement = (settled or {}).get('details', {})
+        if settlement.get('compatibility') is not None:
+            # Preserve the level/changes actually used by this request. Recovery
+            # applies to the next request, but belongs in this one's diagnostics.
+            report.setdefault('compatibility', {}).update(settlement['compatibility'])
+        if 'compatibility_error' in settlement:
+            row['compatibility_error'] = settlement['compatibility_error']
         row.update(state='success', phase='complete', observation=observation, resources=telemetry,
                    seconds=time.perf_counter() - started, metrics=attempt_metrics(metrics))
         report['profile'] = current

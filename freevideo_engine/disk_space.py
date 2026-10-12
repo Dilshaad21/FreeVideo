@@ -15,14 +15,17 @@ import sys
 import threading
 import time
 
+from .long_paths import io_path, plain, plain_errors
+
 _HIDDEN_MOUNTS = ('/System/Volumes/', '/private/var/vm', '/Library/Developer/CoreSimulator', '/Volumes/.timemachine')
 
 
+@plain_errors
 def existing(path):
-    path = Path(path).expanduser()
+    path = io_path(Path(path).expanduser())
     while not path.exists() and path != path.parent:
         path = path.parent
-    return path
+    return Path(plain(path))
 
 
 if sys.platform == 'darwin':
@@ -181,23 +184,25 @@ def volume(path):
     return value
 
 
+@plain_errors
 def free_bytes(path):
     """Bytes that can be written at path, counting space the system frees on demand."""
     if sys.platform != 'darwin':
-        return shutil.disk_usage(existing(path)).free
+        return shutil.disk_usage(io_path(existing(path))).free
     try:
         return volume(path)['free_bytes']
     except (OSError, ValueError):
-        return shutil.disk_usage(existing(path)).free
+        return shutil.disk_usage(io_path(existing(path))).free
 
 
+@plain_errors
 def disk_key(path):
     """Paths with the same key draw on the same free space."""
-    path = existing(path)
+    path = io_path(existing(path))
     if sys.platform != 'darwin':
         return path.stat().st_dev
     try:
-        return _describe(_stat(path), str(path), details=False)['key']
+        return _describe(_stat(path), plain(path), details=False)['key']
     except (OSError, ValueError):
         return path.stat().st_dev
 

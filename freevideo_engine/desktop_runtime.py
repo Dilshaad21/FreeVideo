@@ -14,8 +14,9 @@ import time
 import traceback
 import uuid
 
-from . import __version__, processes
+from . import __version__, launch_view, processes
 from .monitoring import save
+from .long_paths import io_path, resolved, plain, plain_text, plain_errors
 from .system import install_root, windows
 
 
@@ -58,7 +59,7 @@ def matching_source(bundled, installed):
     Read source only: neither editable metadata nor an old receipt is proof
     that the running launcher and the selected engine contain the same code.
     """
-    bundled, installed = Path(bundled).resolve(), Path(installed).resolve()
+    bundled, installed = resolved(bundled), resolved(installed)
     if bundled == installed:
         return True
     try:
@@ -79,7 +80,7 @@ def source_release(source):
     A source checkout has no stamp and returns an empty identity."""
     from .release_notes import product_version
     try:
-        stamp = json.loads((Path(source) / 'freevideo_engine' / 'build-identity.json').read_text(encoding='utf-8'))
+        stamp = json.loads((io_path(source) / 'freevideo_engine' / 'build-identity.json').read_text(encoding='utf-8'))
     except (OSError, ValueError, TypeError):
         return {}
     if not isinstance(stamp, dict):
@@ -123,10 +124,12 @@ def check_launcher_reopen(destination):
     return dict(dependencies, installed_history=True)
 
 
+@plain_errors
 def check_launcher_payload(source, destination):
     """Exercise installation metadata in the actual EXE, without installing anything."""
     from . import comfy_source, network
-    package = Path(__file__).parent
+    package = io_path(Path(__file__).parent)
+    source, destination = io_path(source), io_path(destination)
     files = package_data_files(package.parent)
     # A missing manifest must fail even if the frozen package contains no data.
     for name in ('dependencies.json', 'bootstrap_versions.json', 'model_files.json', 'prepared_models.json', 'test_prompts.json'):
@@ -135,8 +138,8 @@ def check_launcher_payload(source, destination):
         relative = path.relative_to(package.parent)
         if path.read_bytes() != (source / relative).read_bytes():
             raise ValueError('Packaged resource differs from installation source: ' + str(relative))
-    layout = comfy_source.new_layout(str(destination / 'new-install'))
-    if Path(layout['root']).exists():
+    layout = comfy_source.new_layout(plain(destination / 'new-install'))
+    if io_path(layout['root']).exists():
         raise ValueError('Launcher smoke inspection created a ComfyUI installation')
     return dict(resources=[p.relative_to(package.parent).as_posix() for p in files],
                 comfy_source=layout['source_spec'], model_repo=network.model_spec()['vdn_repo'])
@@ -145,11 +148,11 @@ def check_launcher_payload(source, destination):
 def materialize_source(bundle=None, destination=None):
     """A one-file executable's temporary extraction must never back an editable install."""
     if bundle is None and not getattr(sys, 'frozen', False):
-        return Path(__file__).resolve().parents[1]
-    bundle = Path(bundle or Path(sys._MEIPASS) / 'engine-source')
+        return Path(plain(resolved(__file__).parents[1]))
+    bundle = io_path(bundle or Path(sys._MEIPASS) / 'engine-source')
     rows = {p.relative_to(bundle).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files(bundle)}
     identity = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()[:16]
-    parent = Path(destination or launcher_root() / 'source')
+    parent = io_path(destination or launcher_root() / 'source')
     target = parent / (__version__ + '-' + identity)
 
     def complete(path):
@@ -160,7 +163,7 @@ def materialize_source(bundle=None, destination=None):
             return False
 
     if complete(target):
-        return target
+        return Path(plain(target))
     parent.mkdir(parents=True, exist_ok=True)
     # Not mkdtemp: on Windows its folder is readable only by its owner, and a
     # run as administrator makes Administrators the owner, so the same person's
@@ -176,13 +179,13 @@ def materialize_source(bundle=None, destination=None):
         while True:
             if target.exists():
                 if complete(target):
-                    return target
+                    return Path(plain(target))
                 # Retain edits and incomplete deployments without overwriting them.
                 target = parent / (__version__ + '-' + identity + '-' + uuid.uuid4().hex[:8])
                 continue
             try:
                 stage.rename(target)
-                return target
+                return Path(plain(target))
             except OSError as error:
                 # Another launcher can publish between exists() and rename().
                 # Windows reports ERROR_ALREADY_EXISTS; POSIX uses ENOTEMPTY.
@@ -230,8 +233,8 @@ def local_model_ui(message):
 
 class Runner:
     def __init__(self, source, events, logs=None):
-        self.source, self.events = Path(source), events
-        self.logs = Path(logs or launcher_root() / 'runs')
+        self.source, self.events = Path(plain(source)), events
+        self.logs = Path(plain(logs or launcher_root() / 'runs'))
         self.process = self.thread = None
         self.cancelled = threading.Event()
         self.lock = threading.Lock()
@@ -273,18 +276,28 @@ class Runner:
         return env
 
     def _run_awake(self, action, root, arguments):
-        run = self.logs / (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex[:8])
+        run = io_path(self.logs) / (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex[:8])
         code, output, error = None, '', None
         started = time.monotonic()
         try:
             run.mkdir(parents=True)
             command = self.command(root, arguments)
             save(run / 'status.json', dict(action=action, command=command, root=str(root), status='running'))
-            self.events.put(('started', str(run)))
+            self.events.put(('started', plain(run)))
             env = self.environment(root)
             with (run / 'launcher.log').open('w', encoding='utf-8', buffering=1) as log:
+                def plain_message(value):
+                    if isinstance(value, str):
+                        return plain_text(value)
+                    if isinstance(value, dict):
+                        return {key: plain_message(item) for key, item in value.items()}
+                    if isinstance(value, list):
+                        return [plain_message(item) for item in value]
+                    return value
+
                 def progress(message):
                     nonlocal output
+                    message = plain_message(message)
                     line = json.dumps(message) + '\n'
                     log.write(line)
                     output = (output + line)[-2 * 1024 * 1024:]
@@ -292,6 +305,8 @@ class Runner:
                     if message.get('event') == 'freevideo_ui':
                         self.events.put(('progress', message))
                 env = self.prepare(action, root, env, progress)
+                view = launch_view.for_engine(root)
+                env = launch_view.environment_view(env, view)
                 if self.cancelled.is_set():
                     raise RuntimeError('Stopped; files retained')
                 with self.lock:
@@ -315,12 +330,13 @@ class Runner:
                     if self.cancelled.is_set():
                         processes.stop(process)
                 for line in process.stdout:
+                    line = launch_view.line_back(plain_text(line), view)
                     log.write(line)
                     output = (output + line)[-2 * 1024 * 1024:]
                     self.events.put(('log', line))
                     if line.startswith('{'):
                         try:
-                            message = json.loads(line)
+                            message = plain_message(json.loads(line))
                             if message.get('event') == 'freevideo_ui':
                                 if message.get('kind') == 'failure' and isinstance(message.get('error'), str):
                                     error = message['error']
@@ -332,8 +348,8 @@ class Runner:
                 code = process.wait(timeout=15)
                 process.stdout.close()
         except BaseException as failure:
-            error = repr(failure)
-            detail = '\n' + traceback.format_exc()
+            error = plain_text(repr(failure))
+            detail = plain_text('\n' + traceback.format_exc())
             output += detail
             try:
                 with (run / 'launcher.log').open('a', encoding='utf-8') as log:
@@ -345,11 +361,11 @@ class Runner:
                 processes.stop(self.process)
         finally:
             result = dict(action=action, status='cancelled' if self.cancelled.is_set() else 'complete' if code == 0 else 'failed',
-                returncode=code, error=error, wall_seconds=time.monotonic()-started, root=str(root), log=str(run))
+                returncode=code, error=error, wall_seconds=time.monotonic()-started, root=str(root), log=plain(run))
             try:
                 save(run / 'status.json', result)
             except OSError as failure:
-                result.update(status='failed', error=str(failure))
+                result.update(status='failed', error=plain_text(failure))
             with self.lock:
                 self.process = None
             self.events.put(('done', dict(result, output=output)))

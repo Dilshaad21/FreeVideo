@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import sys
 from urllib.parse import quote, urlsplit
+from .long_paths import io_path, plain_errors
 
 
 def runtime_packages_supported():
@@ -47,8 +48,9 @@ def video_instructions(zh=False):
             '按模型页说明选择显卡版本，保留下载的目录结构。')[bool(zh)]
 
 
+@plain_errors
 def links():
-    root = Path(__file__).parent
+    root = io_path(Path(__file__).parent)
     spec = json.loads((root / 'dependencies.json').read_text(encoding='utf-8'))['models']
     edge = json.loads((root / 'prepared_models.json').read_text(encoding='utf-8'))
     return {
@@ -64,9 +66,10 @@ def links():
     }
 
 
+@plain_errors
 def cloud_models():
     """Only publisher-approved or release-verified shares become download links."""
-    path = Path(__file__).with_name('model_shares.json')
+    path = io_path(Path(__file__).with_name('model_shares.json'))
     if not path.exists():
         return []
     value = json.loads(path.read_text(encoding='utf-8'))

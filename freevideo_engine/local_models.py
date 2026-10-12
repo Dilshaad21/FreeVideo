@@ -7,6 +7,7 @@ import time
 
 from .download_cache import discard_read_cache
 from .storage import fingerprint
+from .long_paths import io_path, resolved, plain
 
 BLOCK = 4 * 2**20
 MAX_ENTRIES = 200_000
@@ -28,9 +29,9 @@ def library_roots(values, *, keep_first=False):
     for value in values:
         if not isinstance(value, str) or not value.strip() or len(value) > 4096:
             raise ValueError('Invalid model library path')
-        path = Path(value).expanduser().resolve()
+        path = resolved(Path(value).expanduser())
         if not path.is_dir() or path == Path(path.anchor):
-            raise ValueError('Choose an existing model folder, not an entire drive: ' + str(path))
+            raise ValueError('Choose an existing model folder, not an entire drive: ' + plain(path))
         if path not in roots:
             roots.append(path)
     # Explicit symlink/junction roots are resolved above. Internal directory
@@ -40,7 +41,7 @@ def library_roots(values, *, keep_first=False):
         if not keep_first:
             raise ValueError('Select at most 64 model libraries')
         roots = roots[:MAX_ROOTS]
-    return [str(path) for path in roots]
+    return [plain(path) for path in roots]
 
 
 def scan_many(directories, rows, *, prior=None, callback=None):
@@ -71,8 +72,8 @@ def expected(row):
 
 def can_link(source, destination_parent):
     """A read-only plan: never create a probe file before consent."""
-    source_device = Path(source).stat().st_dev
-    if not source_device or source_device != Path(destination_parent).stat().st_dev:
+    source_device = io_path(source).stat().st_dev
+    if not source_device or source_device != io_path(destination_parent).stat().st_dev:
         return False
     if os.name != 'nt':
         return True
@@ -91,7 +92,7 @@ def volume_filesystem(path):
         ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD),
         wintypes.LPWSTR, wintypes.DWORD]
     volume, filesystem = ctypes.create_unicode_buffer(32768), ctypes.create_unicode_buffer(64)
-    if not kernel.GetVolumePathNameW(str(path), volume, len(volume)):
+    if not kernel.GetVolumePathNameW(str(io_path(path)), volume, len(volume)):
         return None
     if not kernel.GetVolumeInformationW(volume.value, None, 0, None, None, None, filesystem, len(filesystem)):
         return None
@@ -122,9 +123,10 @@ def hash_source(path, row, progress=None, output=None):
     import hashlib
     from .model_status import NAMES, family
     name = NAMES[family(row)][0]
+    path = io_path(path)
     before = fingerprint(path)
     if before['bytes'] != row['bytes'] or not stat.S_ISREG(path.stat().st_mode):
-        raise ValueError('Local model size/type changed: ' + str(path))
+        raise ValueError('Local model size/type changed: ' + plain(path))
     digest = hashlib.new('sha256' if row.get('sha256') else 'sha1')
     if not row.get('sha256'):
         digest.update(('blob %d\0' % row['bytes']).encode())
@@ -136,7 +138,7 @@ def hash_source(path, row, progress=None, output=None):
     with path.open('rb') as stream:
         for block in iter(lambda: stream.read(BLOCK), b''):
             if done+len(block) > row['bytes']:
-                raise ValueError('Local model grew while being read: ' + str(path))
+                raise ValueError('Local model grew while being read: ' + plain(path))
             digest.update(block)
             if output is not None:
                 output.write(block)
@@ -144,12 +146,13 @@ def hash_source(path, row, progress=None, output=None):
             done += len(block)
             progress.send(phase, path, done, row['bytes'], name=name)
     if fingerprint(path) != before or done != row['bytes']:
-        raise ValueError('Local model changed while being read: ' + str(path))
+        raise ValueError('Local model changed while being read: ' + plain(path))
     progress.send(phase, path, done, row['bytes'], force=True, name=name)
     return digest.hexdigest(), before
 
 
 def files(directory, progress):
+    directory = io_path(directory)
     seen = 0
     def failed(error):
         raise OSError('Cannot read part of the selected model folder; choose an accessible folder') from error
@@ -174,17 +177,17 @@ def files(directory, progress):
                 resolved = path.resolve(strict=True)
                 info = resolved.stat()
                 if stat.S_ISREG(info.st_mode):
-                    yield resolved, info
+                    yield Path(plain(resolved)), info
             except (OSError, RuntimeError):
                 continue
 
 
 def scan(directory, rows, *, prior=None, callback=None):
-    directory = Path(directory).expanduser().resolve()
+    directory = resolved(Path(directory).expanduser())
     if not rows:
-        return dict(root=str(directory), matches={}, candidate_files=0, rejected_count=0, rejected=[], reused_bytes=0)
+        return dict(root=plain(directory), matches={}, candidate_files=0, rejected_count=0, rejected=[], reused_bytes=0)
     if not directory.is_dir():
-        raise ValueError('Existing model folder is missing or unreadable: ' + str(directory))
+        raise ValueError('Existing model folder is missing or unreadable: ' + plain(directory))
     progress = Progress(callback)
     progress.send('scan', force=True)
     by_size = {}
@@ -192,7 +195,8 @@ def scan(directory, rows, *, prior=None, callback=None):
         by_size.setdefault(row['bytes'], []).append(row)
     candidates, seen = [], set()
     for path, info in files(directory, progress):
-        identity = (info.st_dev, info.st_ino) if info.st_ino else str(path)
+        path = io_path(path)
+        identity = (info.st_dev, info.st_ino) if info.st_ino else plain(path)
         if info.st_size in by_size and identity not in seen:
             candidates.append(path)
             seen.add(identity)
@@ -200,8 +204,8 @@ def scan(directory, rows, *, prior=None, callback=None):
                 raise ValueError('Too many possible models. Select a narrower model folder.')
     # Prefer expected names/known HF blobs; still verify the actual content.
     names = {Path(row['file']).name for row in rows} | {expected(row) for row in rows}
-    candidates.sort(key=lambda path: (path.name not in names, str(path)))
-    previous = (prior or {}).get('matches', {}) if (prior or {}).get('root') == str(directory) else {}
+    candidates.sort(key=lambda path: (path.name not in names, plain(path)))
+    previous = (prior or {}).get('matches', {}) if (prior or {}).get('root') == plain(directory) else {}
     old_paths = {value.get('source'): value for value in previous.values() if isinstance(value, dict)}
     matches, rejected = {}, []
     for path in candidates:
@@ -211,7 +215,7 @@ def scan(directory, rows, *, prior=None, callback=None):
             continue
         # One file can match multiple identical configs. Hash once per algorithm.
         computed = {}
-        old = old_paths.get(str(path), {})
+        old = old_paths.get(plain(path), {})
         for row in options:
             algorithm = 'sha256' if row.get('sha256') else 'git_blob'
             if algorithm not in computed:
@@ -224,19 +228,19 @@ def scan(directory, rows, *, prior=None, callback=None):
                     computed[algorithm] = hash_source(path, row, progress)
             digest, stamp = computed[algorithm]
             if digest == expected(row):
-                matches[key(row)] = dict(source=str(path), fingerprint=stamp, digest=digest,
+                matches[key(row)] = dict(source=plain(path), fingerprint=stamp, digest=digest,
                                          algorithm=algorithm, bytes=row['bytes'])
-        if not any(record['source'] == str(path) for record in matches.values()):
+        if not any(record['source'] == plain(path) for record in matches.values()):
             rejected.append(dict(file=path.name, reason='Content does not match this engine revision'))
     progress.send('ready', done=len(rows), total=len(rows), force=True)
-    return dict(root=str(directory), matches=matches, candidate_files=len(candidates),
+    return dict(root=plain(directory), matches=matches, candidate_files=len(candidates),
                 rejected_count=len(rejected), rejected=rejected[:20],
                 reused_bytes=sum(record['bytes'] for record in matches.values()))
 
 
 def import_file(row, target, record, *, callback=None):
     """Create an installation-owned reference/copy; never modify the source."""
-    source, target = Path(record['source']), Path(target)
+    source, target = io_path(record['source']), io_path(target)
     if record.get('digest') != expected(row) or record.get('bytes') != row['bytes']:
         raise ValueError('Local model selection no longer matches the pinned manifest')
     progress = Progress(callback)
@@ -244,9 +248,9 @@ def import_file(row, target, record, *, callback=None):
     if current != record.get('fingerprint'):
         digest, current = hash_source(source, row, progress)
         if digest != expected(row):
-            raise ValueError('Selected local model changed; inspect the folder again: ' + str(source))
+            raise ValueError('Selected local model changed; inspect the folder again: ' + plain(source))
     if target.exists() or target.is_symlink():
-        raise ValueError('Model destination already exists; both files retained: ' + str(target))
+        raise ValueError('Model destination already exists; both files retained: ' + plain(target))
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(target.name + '.local-import-' + str(time.time_ns()))
     method = record['method']

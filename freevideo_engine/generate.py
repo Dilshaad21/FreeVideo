@@ -55,7 +55,7 @@ def child(command, env, descriptor, log, *, ram_budget_bytes=None, gpu=None, on_
                 on_start(process.pid)
             if gpu:
                 from .monitoring import Monitor
-                monitor = Monitor(log.with_suffix('.gpu.csv'), device=gpu).start()
+                monitor = Monitor(log.with_suffix('.gpu.csv'), device=gpu, pid=process.pid).start()
             while process.poll() is None:
                 if memory:
                     sample = memory.sample(process.pid)

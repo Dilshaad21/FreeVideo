@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .comfy_assets import output_summary
+from .runtime_alias import is_junction, checked_real_path, AliasUnavailable
+from .long_paths import io_path, plain
+from .system import windows
 
 _ID = re.compile(r'\d{4}-\d{2}-\d{2}/[0-9a-f]{32}')
 
@@ -159,6 +162,7 @@ def _plain(path):
 
 def _foreign(folder):
     """Names in a run folder that FreeVideo did not write, or that are links."""
+    folder = io_path(checked_real_path(folder))
     kept = []
     for entry in sorted(folder.iterdir()):
         if not _plain(entry):
@@ -171,6 +175,7 @@ def _foreign(folder):
                 for name in folders + files:
                     if not _plain(Path(parent) / name):
                         kept.append((Path(parent) / name).relative_to(folder).as_posix())
+                folders[:] = [name for name in folders if not is_junction(Path(parent) / name)]
         elif not _OWNED_FILE.fullmatch(entry.name):
             kept.append(entry.name)
     return kept
@@ -178,27 +183,57 @@ def _foreign(folder):
 
 def _remove(folder):
     """Remove a verified folder bottom-up; return bytes freed and paths left behind."""
+    try:
+        folder = io_path(checked_real_path(folder))
+    except AliasUnavailable:
+        return 0, [plain(folder)]
     freed, left = 0, []
-    for parent, folders, files in os.walk(folder, topdown=False):
+    if is_junction(folder):
+        return 0, [plain(folder)]
+    if windows():
+        # Bottom-up os.walk cannot prune before entering a Windows junction.
+        # Collect a pruned listing, then keep os.walk's original bottom-up
+        # sibling order when removing ordinary rows.
+        rows = {}
+        for parent, folders, files in os.walk(folder):
+            linked = [name for name in folders if is_junction(Path(parent) / name)]
+            left.extend(plain(Path(parent) / name) for name in linked)
+            folders[:] = [name for name in folders if name not in linked]
+            rows[Path(parent)] = (parent, folders[:], files)
+        ordered, pending = [], [(Path(folder), False)]
+        while pending:
+            current, visited = pending.pop()
+            row = rows.get(current)
+            if row is None:
+                continue
+            if visited:
+                ordered.append(row)
+            else:
+                pending.append((current, True))
+                pending.extend((current / name, False) for name in reversed(row[1]))
+        walk = ordered
+    else:
+        walk = os.walk(folder, topdown=False)
+    for parent, folders, files in walk:
         for name in files:
             path = Path(parent) / name
             try:
                 if not _plain(path):
-                    left.append(str(path)); continue
+                    left.append(plain(path)); continue
                 size = path.stat().st_size
                 path.unlink()
                 freed += size
             except OSError:
-                left.append(str(path))
+                left.append(plain(path))
         for name in folders:
             try:
                 (Path(parent) / name).rmdir()
             except OSError:
-                left.append(str(Path(parent) / name))
+                left.append(plain(Path(parent) / name))
     try:
         Path(folder).rmdir()
     except OSError:
-        left.append(str(folder))
+        left.append(plain(folder))
     return freed, left
 
 
@@ -222,9 +257,9 @@ def release_decoded(folder):
     or any link, is left alone, as delete_video leaves it. Paths Windows still
     has open are listed.
     """
-    folder = Path(folder)
-    artifacts = folder / _OWNED_FOLDER
     try:
+        folder = io_path(checked_real_path(folder))
+        artifacts = folder / _OWNED_FOLDER
         if not _plain(folder) or _foreign(folder):
             return dict(freed_bytes=0, left=[], skipped='foreign-files')
         if not artifacts.is_dir():
@@ -258,6 +293,7 @@ def release_decoded(folder):
 def release_later(output_directory):
     """Have the next start finish a release that Windows kept open."""
     from .monitoring import save
+    output_directory = checked_real_path(output_directory)
     with _RELEASING:
         save(Path(output_directory).resolve() / 'FreeVideo' / _RELEASED, dict(schema=1, pending=True))
 
@@ -270,6 +306,10 @@ def release_earlier(output_directory):
     it while a file Windows kept open is left.
     """
     from .monitoring import save
+    try:
+        output_directory = checked_real_path(output_directory)
+    except AliasUnavailable:
+        return None
     root = Path(output_directory).resolve() / 'FreeVideo'
     marker = root / _RELEASED
     if not root.is_dir():
@@ -319,6 +359,10 @@ def delete_video(output_directory, identity):
     The folder is first renamed into FreeVideo/.deleted, so it leaves the
     library at once, or, when Windows still has a file open, nothing changes.
     """
+    try:
+        output_directory = checked_real_path(output_directory)
+    except AliasUnavailable as error:
+        raise DeleteRefused('not-freevideo') from error
     path = _video(output_directory, identity)
     _report(path)
     root = Path(output_directory).resolve() / 'FreeVideo'

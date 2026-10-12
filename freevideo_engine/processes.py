@@ -7,6 +7,7 @@ import sys
 import threading
 from contextlib import contextmanager
 
+from . import launch_view
 from .system import windows
 
 HANDLE_ENV = 'FREEVIDEO_RUNTIME_LOCK_HANDLE'
@@ -40,8 +41,12 @@ def module_command(module, *arguments):
         return [sys.executable, '--freevideo-module', module, *map(str, arguments)]
     code = ("import runpy,sys;sys.path.insert(0,sys.argv.pop(1));"
             "runpy.run_module(sys.argv.pop(1),run_name='__main__',alter_sys=True)")
-    return [sys.executable, '-B', '-X', 'utf8', '-c', code,
-            str(Path(__file__).resolve().parents[1]), module, *map(str, arguments)]
+    source = Path(__file__).resolve().parents[1]
+    view = launch_view.current()
+    if view is not None:
+        # Resolving leads back to the real folder; the child imports from the short one.
+        source = launch_view.value(source, view)
+    return [sys.executable, '-B', '-X', 'utf8', '-c', code, str(source), module, *map(str, arguments)]
 
 
 class WindowsPopen(subprocess.Popen):
@@ -128,6 +133,13 @@ class WindowsPopen(subprocess.Popen):
 
 
 def popen(command, *, pass_fds=(), supervise=False, **kwargs):
+    # A child of an offline runtime that needs its short root, or of a process
+    # already running from it, starts from that root (see launch_view).
+    view = launch_view.current(kwargs.get('env')) or launch_view.current()
+    if view is not None:
+        command, kwargs['env'], cwd = launch_view.execution(command, kwargs.get('env'), kwargs.get('cwd'), view)
+        if cwd is not None:
+            kwargs['cwd'] = cwd
     if windows():
         return WindowsPopen(command, pass_fds=pass_fds, **kwargs)
     if sys.platform == 'darwin':

@@ -89,8 +89,10 @@ export async function notifyCompatibility() {
         const request=await client(), value=await request('check');
         if (!value.available || !value.notice) return;
         const panel = dialog(t('Compatibility enabled', '已开启兼容性设置'));
-        const message = element('p', t(`The previous generation ended unexpectedly. Compatibility level ${value.level} is now enabled. You can adjust or disable it in settings.`,
-            `上次生成未正常结束，已自动开启兼容性设置（第 ${value.level} 档）。你可以在设置里调节或关闭。`));
+        const message = element('p', value.recovery_disabled
+            ? t('Generation is slowed automatically for stability; you can change this in Settings.', '为了稳定，生成已自动放慢；可在设置里调整。')
+            : t('Generation is slowed automatically for stability; it speeds up after 3 successful generations in a row, or you can change this in Settings.',
+                '为了稳定，生成已自动放慢；连续完成 3 次后会加快一些，也可在设置里调整。'));
         panel.actions.before(message);
         const finish = async (settings) => {
             try { await request('ack', {notice_id: value.notice.id}); panel.close(); if (settings) await openCompatibility(); }

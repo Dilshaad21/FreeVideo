@@ -29,10 +29,14 @@ def sampler_for_canvas(sampler, width, height):
 
     Engine.sample supplies no_grad. Never edit the upstream file or mutate its
     module globals: two Engine instances can use different canvases safely.
+    The upstream sampler builds its schedulers by name; it gets the engine's,
+    whose step grid is the one the modulation tables were made with.
     """
+    from .step_grid import scheduler
     original = inspect.unwrap(sampler)
     bound = types.FunctionType(original.__code__,
-        dict(original.__globals__, LATENT_H=height // 16, LATENT_W=width // 16),
+        dict(original.__globals__, LATENT_H=height // 16, LATENT_W=width // 16,
+             MiniMaxH3Scheduler=scheduler),
         original.__name__, original.__defaults__, original.__closure__)
     bound.__kwdefaults__ = original.__kwdefaults__
     return bound

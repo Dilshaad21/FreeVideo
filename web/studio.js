@@ -18,6 +18,8 @@ import { createSamplingEffort } from './sampling_effort.js';
 import { resultActions, previewBadge } from './result_actions.js';
 import { createPromptEnhancer } from './prompt_enhance.js';
 import { rememberPromptDraft } from './prompt_draft.js';
+import { canvasDimensions, imageSizeSelection } from './studio_size.js';
+import { createCapabilityView } from './capability_view.js';
 
 const languageOverride = typeof location !== 'undefined'
     ? new URLSearchParams(location.search).get('freevideo_lang') : null;
@@ -206,13 +208,18 @@ export function openStudio(node) {
         ? node.properties.freevideo_pixels : (initialWidth * initialHeight) / 1024 ** 2;
     let disposed = false;
     const mp = el('select'); mp.setAttribute('aria-label', t('Total pixels', '总像素'));
-    for (const [n, label] of [[.5, '0.50 MP'], [.75, '0.75 MP'], [.98, t('0.98 MP · Native', '0.98 MP · 原生')], [1, '1.00 MP'], [1.5, '1.50 MP'], [2, '2.00 MP']]) { const option = el('option', label); option.value = n; mp.append(option); }
-    const nearest = [...mp.options].find(o => Math.abs(Number(o.value) - pixels) < .03);
-    if (nearest) mp.value = nearest.value; else { const option = el('option', `${pixels.toFixed(2)} MP`); option.value = pixels; mp.append(option); mp.value = pixels; }
+    const presetRatio = {'16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1}[selected] || ratio;
+    const sizeSelection = imageSizeSelection(pixels, selected === 'custom' ? null : presetRatio, Number(initialWidth), Number(initialHeight));
+    if (pixels === 1 && sizeSelection.value === .98) pixels = .98;
+    for (const n of sizeSelection.options) { const option = el('option', n === .98 ? t('0.98 MP · Native', '0.98 MP · 原生') : `${n.toFixed(2)} MP`); option.value = n; mp.append(option); }
+    mp.value = sizeSelection.value;
+    const legacyOption = [...mp.options].find(o => Number(o.value) === 1);
     mp.title = t('1 MP = 1024 × 1024, as in ComfyUI.', '1 MP = 1024 × 1024，与 ComfyUI 一致。'); mp.disabled = dimensionsLinked;
     const seconds = el('input'); seconds.type = 'number'; seconds.min = '1.625'; seconds.max = '60'; seconds.step = 'any'; seconds.value = value(node, 'seconds'); seconds.disabled = linked(node, 'seconds'); seconds.setAttribute('aria-label', t('Duration in seconds', '时长（秒）'));
     const fields = el('div', null, 'fv-fields'); fields.append(field(t('Total pixels', '总像素'), mp), field(t('Duration · seconds', '时长 · 秒'), seconds)); canvas.append(fields);
     const canvasNote = el('div', null, 'fv-canvas-note'), dimensions = el('span'), duration = el('span'); canvasNote.append(dimensions, duration); canvas.append(canvasNote);
+    const rangeMount = el('div'); canvas.append(rangeMount);
+    let capabilityView;
     // State of the two-pass choice below; the radio group is what is shown.
     const twoPass = el('input'); twoPass.type = 'checkbox'; twoPass.checked = value(node, 'two_pass') !== false;
     twoPass.disabled = linked(node, 'two_pass') || !widget(node, 'two_pass');
@@ -360,6 +367,8 @@ export function openStudio(node) {
     syncSamplingSteps();
     advanced.append(samplingFields, samplingWarning);
     function showEffortEstimate(steps = Number(baseSteps.value), twoPassPlan = twoPass.checked) {
+        const rangeEstimate = capabilityView?.estimate(steps, twoPassPlan, arguments.length ? 3 : Number(refineSteps.value));
+        if (rangeEstimate) { effort.setEstimate(rangeEstimate); return; }
         const mode = twoPassPlan ? 'two_pass' : 'single';
         const estimate = effortEstimate[mode]?.[steps];
         // A previewed level always refines three steps; the current plan may not.
@@ -377,6 +386,7 @@ export function openStudio(node) {
                 '根据本机完整生成记录估算，包含加载与解码；首次准备或其他程序占用可能延长时间。'));
     }
     function refreshEffortEstimate(force = false) {
+        capabilityView?.update();
         let task = 'external';
         try {
             if (!linked(node, 'conditioning')) {
@@ -785,8 +795,7 @@ export function openStudio(node) {
     }
     function applySize() {
         if (dimensionsLinked) return;
-        const total = pixels * 1024 ** 2;
-        const w = Math.round(Math.sqrt(total * ratio) / 32) * 32, h = Math.round(Math.sqrt(total / ratio) / 32) * 32;
+        const [w, h] = canvasDimensions(pixels, ratio);
         if (w < 256 || h < 256 || w > 4096 || h > 4096) throw new Error(t('This aspect ratio and pixel count exceed the supported dimensions. Use custom dimensions.', '该比例与像素数超出尺寸范围，请使用自定义宽高。'));
         set(node, 'width', w); set(node, 'height', h); node.properties.freevideo_aspect = selected; node.properties.freevideo_pixels = pixels; updateCanvas();
     }
@@ -805,7 +814,7 @@ export function openStudio(node) {
         b.dataset.ratio = id; b.setAttribute('aria-label', label); b.disabled = dimensionsLinked;
         b.append(el('span', null, 'fv-shape-icon'), el('span', label)); shapes.append(b);
     }
-    mp.onchange = () => { try { pixels = Number(mp.value); applySize(); } catch (error) { status.dataset.error = 'true'; status.textContent = error.message; } };
+    mp.onchange = () => { try { pixels = Number(mp.value); applySize(); if (pixels !== 1) legacyOption?.remove(); } catch (error) { status.dataset.error = 'true'; status.textContent = error.message; } };
     seconds.onchange = () => { if (seconds.value && seconds.reportValidity()) { set(node, 'seconds', Number(seconds.value)); updateCanvas(); } };
     const mediaChanged = async e => { if (String(e.detail) !== String(mediaNode?.id)) return; refreshEffortEstimate(); if (selected !== 'input') return; try { await inputRatio(); } catch (error) { status.textContent = error.message; } };
     const lorasChanged = e => { if (String(e.detail) === String(loraNode?.id)) refreshEffortEstimate(); };
@@ -858,6 +867,16 @@ export function openStudio(node) {
     const escape = e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); generate.click(); } }; dialog.addEventListener('keydown', escape);
     dialog.addEventListener('cancel', e => { e.preventDefault(); closeDialog(dialog); });
     dialog.onclose = () => { disposed = true; for (const f of cleanup) f(); stage.querySelector('video')?.pause(); dialog.remove(); if (current?.dialog === dialog) { current = null; viewChanged('nodes', node); } };
+    capabilityView = createCapabilityView({node, api, t, getState: () => ({ratio,
+        custom: selected === 'custom', steps: Number(baseSteps.value), twoPass: twoPass.checked,
+        refine: Number(refineSteps.value), disabled: dimensionsLinked || seconds.disabled}), onEstimate: () => showEffortEstimate(), onPick: point => {
+        pixels = point.pixels; mp.value = String(pixels);
+        set(node, 'width', point.width); set(node, 'height', point.height);
+        node.properties.freevideo_pixels = pixels;
+        seconds.value = point.seconds; set(node, 'seconds', point.seconds); updateCanvas();
+    }});
+    rangeMount.append(capabilityView.element); cleanup.push(capabilityView.dispose);
+    controls.addEventListener('change', () => capabilityView.update());
     document.body.append(dialog); dialog.showModal(); viewChanged('studio', node); updateCanvas();
     const recentLoad = recent.refresh();
     if (node.freevideoProgress) showProgress(node.freevideoProgress);

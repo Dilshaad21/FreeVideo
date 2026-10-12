@@ -10,13 +10,16 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
+from . import execution_paths
+from .long_paths import io_path, resolved, plain, plain_errors
 from . import network
 
 CATALOG = Path(__file__).with_name('prepared_models.json')
 
 
+@plain_errors
 def catalog():
-    value = json.loads(CATALOG.read_text(encoding='utf-8'))
+    value = json.loads(io_path(CATALOG).read_text(encoding='utf-8'))
     if (value.get('schema_version') != 1 or
             not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', value.get('repo', '')) or
             not re.fullmatch('[0-9a-f]{40}', value.get('revision', ''))):
@@ -56,6 +59,7 @@ def preferred_format(hardware):
     return None
 
 
+@plain_errors
 def select(capability, root, *, scale_granularity=None):
     value = catalog()
     scale = scale_granularity or ('per_tensor' if capability[0] >= 10 else 'rowwise')
@@ -67,12 +71,13 @@ def select(capability, root, *, scale_granularity=None):
     # Adding another format must not move an existing installation to a new
     # directory or redownload its unchanged model. Variants may pin separately.
     revision = variant.get('revision', value['revision'])
-    folder = Path(root).expanduser().resolve() / 'prepared' / ('edge-' + revision[:16])
+    folder = resolved(Path(root).expanduser()) / 'prepared' / ('edge-' + revision[:16])
     return dict(repo=value['repo'], revision=revision, scale_granularity=scale,
-                directory=str(folder), cache=str(folder / variant['cache_prefix']),
+                directory=plain(folder), cache=plain(folder / variant['cache_prefix']),
                 private=value.get('private', False), format=value['format'])
 
 
+@plain_errors
 def files(selection):
     if not selection:
         return []
@@ -80,7 +85,7 @@ def files(selection):
     if any(selection.get(k) != value[k] for k in ('repo', 'format')):
         raise ValueError('Prepared model selection changed; review setup again')
     variant = value['variants'].get(selection['scale_granularity'])
-    if variant is None or Path(selection['cache']).resolve() != (Path(selection['directory']) / variant['cache_prefix']).resolve():
+    if variant is None or resolved(selection['cache']) != resolved(Path(selection['directory']) / variant['cache_prefix']):
         raise ValueError('Invalid prepared model cache path')
     revision = variant.get('revision', value['revision'])
     if selection.get('revision') != revision:
@@ -128,7 +133,7 @@ def access_error(selection, networking, *, environ=None):
         headers = ['Authorization: Bearer ' + secret] if secret and source == 'official' else []
         for route in network.route_order(networking, family, source, env):
             try:
-                result = subprocess.run([
+                result = execution_paths.run([
                     'curl', '--disable', '--silent', '--show-error', '--location', '--head',
                     '--output', os.devnull, '--write-out', '%{http_code}', '--connect-timeout', '5',
                     '--max-time', '12', '--config', '-'],

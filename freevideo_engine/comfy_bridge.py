@@ -12,6 +12,7 @@ import sys
 import time
 import uuid
 
+from .long_paths import io_path, resolved, plain, plain_data, plain_errors
 from . import processes
 from .geometry import geometry
 from .comfy_environment import isolated_environment
@@ -246,8 +247,9 @@ def source_root():
     return Path(__file__).resolve().parents[1]
 
 
+@plain_errors
 def installation_root(source=None, environ=None):
-    source = Path(source or source_root())
+    source = io_path(source or source_root())
     environ = os.environ if environ is None else environ
     selected = environ.get('FREEVIDEO_HOME')
     config = source / 'comfyui.json'
@@ -255,17 +257,18 @@ def installation_root(source=None, environ=None):
         selected = json.loads(config.read_text(encoding='utf-8')).get('installation')
         if not isinstance(selected, str) or not selected.strip():
             raise ValueError('comfyui.json must contain an installation directory.')
-    root = Path(selected).expanduser() if selected else source
+    root = io_path(Path(selected).expanduser()) if selected else source
     if not root.is_absolute():
         root = source / root
-    return root.resolve()
+    return Path(plain(resolved(root)))
 
 
+@plain_errors
 def installation(source=None, environ=None):
     from .comfy_launcher_api import repair_hint
     root = installation_root(source, environ)
     try:
-        machine = json.loads((root / 'machine.json').read_text(encoding='utf-8'))
+        machine = json.loads((io_path(root) / 'machine.json').read_text(encoding='utf-8'))
     except FileNotFoundError as error:
         raise ValueError('FreeVideo setup is missing. ' + repair_hint() + ' Or run setup.cmd (Windows) or setup.sh (Linux) '
                          'in the FreeVideo folder, or set FREEVIDEO_HOME to your existing installation. '
@@ -277,11 +280,11 @@ def installation(source=None, environ=None):
     identity = 'device_identity' if machine.get('device_backend') == 'mps' else 'gpu_uuid'
     if not machine.get(identity):
         raise ValueError('FreeVideo device configuration is missing. ' + repair_hint())
-    if Path(machine['root']).expanduser().resolve() != root:
+    if resolved(Path(machine['root']).expanduser()) != resolved(root):
         raise ValueError('The FreeVideo installation was moved. Rerun setup in the selected folder.')
-    if not Path(machine['python']).is_file():
+    if not io_path(machine['python']).is_file():
         raise ValueError('The FreeVideo Python environment is missing. Rerun setup in %s.' % root)
-    return root, machine
+    return root, plain_data(machine)
 
 
 def validate_request(prompt, width, height, seconds, seed):
@@ -417,13 +420,17 @@ def progress_message(event):
         # crossing a soft estimate while memory is available needs no action.
         return None
     if name == 'compatibility':
-        from .compatibility import LEVELS
+        from .compatibility import LEVELS, RECOVERY_SUCCESSES
         level = event.get('level')
         if type(level) is not int or not 1 <= level <= 3:
             return None
         return {'compatibility': dict(level=level,
                                       name_en=LEVELS[level]['en'].split(' · ', 1)[0],
-                                      name_zh=LEVELS[level]['zh'].split(' · ', 1)[0])}
+                                      name_zh=LEVELS[level]['zh'].split(' · ', 1)[0],
+                                      origin=event.get('origin'),
+                                      consecutive_successes=event.get('consecutive_successes', 0),
+                                      recovery_successes_required=event.get('recovery_successes_required', RECOVERY_SUCCESSES),
+                                      recovery_disabled=event.get('recovery_disabled', False))}
     if name == 'compute_device':
         return {'label': 'Compute device · %s · %s' % (event.get('backend', ''), event.get('name', '')),
                 'device': event}
@@ -823,6 +830,13 @@ def generate(prompt, width, height, seconds, seed, output_directory, *,
             state['result_cache'].update(stored=stored is True, store_inspection=timing)
         send_progress({'label': 'Preview saved' if preview else 'Video + audio saved', 'phase': 'complete',
                        'done': completed_steps, 'total': completed_steps})
+        try:
+            # The validated request report is on disk. This advisory refresh
+            # must never change a successful generation's result.
+            from .comfy_capabilities import changed
+            changed()
+        except Exception:
+            pass
         return output
     except BaseException as error:
         cancelled = isinstance(error, KeyboardInterrupt) or type(error).__name__ in ('InterruptProcessingException', 'CancelledError')

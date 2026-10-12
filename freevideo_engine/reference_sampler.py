@@ -9,7 +9,6 @@ import time
 
 import torch
 
-from diffusers import MiniMaxH3Scheduler
 from diffusers.modular_pipelines.minimax_h3.before_denoise import (
     MiniMaxH3Ref2VAPrepareLayoutStep, patchify_video_latents)
 from diffusers.modular_pipelines.minimax_h3.modular_pipeline import (
@@ -20,6 +19,8 @@ from diffusers.modular_pipelines.minimax_h3.modular_pipeline import (
 from src.models.sequence_layout import layout_from_indices
 from src.inference.render import KEYFRAME_NOISE_AUG
 from src.models.hybrid_transform import iter_hybrids, set_layout
+
+from . import step_grid
 
 # Rebound per Engine request by sampler_for_canvas.
 LATENT_H, LATENT_W = 48, 84
@@ -75,8 +76,8 @@ def generate_latents(transformer, prompt_embeds, text_token_tags, num_frames, nu
             text_indices=text_indices,
         ))
 
-    scheduler = MiniMaxH3Scheduler(shift=video_shift)
-    audio_scheduler = MiniMaxH3Scheduler(shift=audio_shift)
+    scheduler = step_grid.scheduler(shift=video_shift)
+    audio_scheduler = step_grid.scheduler(shift=audio_shift)
     scheduler.set_timesteps(num_steps, device=device)
     audio_scheduler.set_timesteps(num_steps, device=device)
 

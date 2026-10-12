@@ -5,19 +5,20 @@ from pathlib import Path
 import subprocess
 import time
 
-from . import component_licenses, portable, processes
+from . import component_licenses, launch_view, portable, processes
 from .comfy_launcher import Launcher
 from .comfy_launcher_runtime import Controller, local_url, matches_server, server_info
 from .monitoring import save
+from .long_paths import io_path, resolved, plain, plain_text
 
 UNREADABLE = 'FreeVideo cannot read its program files'
 
 
 class PortableController(Controller):
     def __init__(self, root, bundled=None):
-        self.root = Path(root).resolve()
+        self.root = Path(plain(resolved(root)))
         self.bundle = portable.manifest(self.root)
-        super().__init__(portable.inside(self.root, self.bundle['source']))
+        super().__init__(Path(plain(portable.inside(self.root, self.bundle['source']))))
         # The launcher's own engine code, which an installation it assembled can move to.
         self.bundled = Path(bundled) if bundled else None
         self.update_values = None
@@ -32,9 +33,9 @@ class PortableController(Controller):
         # Restoring the launcher is read-only. A bundled deployment is not yet
         # a GPU-ready machine; only initialize() may certify local kernels.
         url = (values.get('installation') or {}).get('url') or values.get('url')
-        self.selection = dict(root=str(portable.inside(self.root, self.bundle['comfy'])),
+        self.selection = dict(root=plain(portable.inside(self.root, self.bundle['comfy'])),
             engine=str(self.root/'engine'), source=str(self.source),
-            python=str(portable.inside(self.root, self.bundle['python'])),
+            python=plain(portable.inside(self.root, self.bundle['python'])),
             url=local_url(url or 'http://127.0.0.1:8188'), ready=False, separate=False)
         self.state = dict(status='bundled', selection=dict(self.selection),
                           engine_update_available=self.engine_outdated())
@@ -48,12 +49,12 @@ class PortableController(Controller):
         longer fits this launcher's engine keeps the code it has. Whether the
         launcher's code is the newer one is the session's comparison, as for
         any installation."""
-        if self.bundled is None or (self.root/'start_portable.py').is_file():
+        if self.bundled is None or (io_path(self.root)/'start_portable.py').is_file():
             return False
         from .desktop_runtime import matching_source
         from .offline_packages import runtime_fits
         try:
-            fits = runtime_fits(json.loads((self.root/'runtime.json').read_text(encoding='utf-8')))
+            fits = runtime_fits(json.loads((io_path(self.root)/'runtime.json').read_text(encoding='utf-8')))
         except (OSError, ValueError, AttributeError):
             return False
         return fits and not matching_source(self.bundled, self.source)
@@ -105,7 +106,7 @@ class PortableController(Controller):
     def terminal_sources(self):
         sources = super().terminal_sources()
         if self.initialization_log:
-            sources.insert(0, ('initialize', str(self.initialization_log)))
+            sources.insert(0, ('initialize', plain(self.initialization_log)))
         if self.comfy_controller:
             sources = [row for row in sources if row[0] != 'comfy'] + self.comfy_controller.terminal_sources()
         return sources
@@ -142,16 +143,16 @@ class PortableController(Controller):
         # missing module.
         for folder in (self.source, Path(self.selection['python']).parent):
             try:
-                os.listdir(folder)
+                os.listdir(io_path(folder))
             except PermissionError:
                 raise RuntimeError('%s: Windows denies this account access to %s' % (UNREADABLE, folder)) from None
             except OSError:
                 pass  # Missing files are for the bundle check to name.
-        log_path = self.root/'engine/portable-runs'/('%s-%s.log' % (time.time_ns(), os.getpid()))
+        log_path = io_path(self.root)/'engine/portable-runs'/('%s-%s.log' % (time.time_ns(), os.getpid()))
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        self.initialization_log = log_path
+        self.initialization_log = Path(plain(log_path))
         command = [self.selection['python'], '-I', '-u', str(self.root/'start_portable.py'), '--initialize']
-        if not (self.root/'start_portable.py').is_file():
+        if not (io_path(self.root)/'start_portable.py').is_file():
             # Independent EXE + environment ZIP: use this launcher's materialized
             # source, without requiring an older launcher inside the archive.
             command = [self.selection['python'], '-I', '-u', '-c',
@@ -159,6 +160,7 @@ class PortableController(Controller):
                 'from freevideo_engine.portable import main;'
                 'sys.exit(main(sys.argv[2], ["--initialize"]))', str(self.source), str(self.root)]
         tail = ''
+        view = launch_view.view_for(self.root)
         self.progress(dict(stage='verify', done=0, total=None, detail='Check local files'))
         try:
             if self.cancelled.is_set():
@@ -167,11 +169,12 @@ class PortableController(Controller):
                 with self._server_lock:
                     if self._closed or self.cancelled.is_set():
                         raise RuntimeError('Startup cancelled; all files retained')
-                    self.child = processes.popen(command, env=portable.environment(self.root, self.bundle),
+                    self.child = processes.popen(command, env=launch_view.environment_view(portable.environment(self.root, self.bundle), view),
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8',
                         start_new_session=True, supervise=True)
                 for line in self.child.stdout:
-                    log.write(line); log.flush()
+                    line = launch_view.line_back(line, view)
+                    log.write(plain_text(line)); log.flush()
                     tail = (tail + line)[-12000:]
                     try:
                         row = json.loads(line)
@@ -186,7 +189,7 @@ class PortableController(Controller):
             if self.cancelled.is_set():
                 raise RuntimeError('Startup cancelled; all files retained')
             if code:
-                raise RuntimeError('Bundle startup failed (exit %s)\n%s\nLog: %s' % (code, tail, log_path))
+                raise RuntimeError('Bundle startup failed (exit %s)\n%s\nLog: %s' % (code, plain_text(tail), plain(log_path)))
         finally:
             if self.child is not None:
                 if self.child.poll() is None:
@@ -194,7 +197,7 @@ class PortableController(Controller):
                 if self.child.stdout:
                     self.child.stdout.close()
                 self.child = None
-        machine = json.loads((self.root/'engine/machine.json').read_text(encoding='utf-8'))
+        machine = json.loads((io_path(self.root)/'engine/machine.json').read_text(encoding='utf-8'))
         self.progress(dict(stage='comfy', detail='Open FreeVideo workflow'))
         opened = portable.connect(self.root, self.bundle, machine, self.progress_keywords,
                                   self.cancelled, url=url, on_controller=self.retain_comfy_controller,
@@ -208,7 +211,7 @@ class PortableController(Controller):
         from .desktop_shortcut import create_after_install
         self.state = dict(self.state, shortcut=create_after_install(
             self.selection['engine'], self.source,
-            portable_root=self.root if (self.root/'FreeVideo.exe').is_file() else None))
+            portable_root=self.root if (io_path(self.root)/'FreeVideo.exe').is_file() else None))
 
     def retain_comfy_controller(self, controller):
         with self._server_lock:
@@ -237,8 +240,8 @@ class PortableController(Controller):
 
 class PortableLauncher(Launcher):
     def __init__(self, window, root):
-        self.bundle_root = Path(root).resolve()
-        self.consent_path = self.bundle_root/'engine/portable-consent.json'
+        self.bundle_root = Path(plain(resolved(root)))
+        self.consent_path = io_path(self.bundle_root)/'engine/portable-consent.json'
         controller = PortableController(self.bundle_root)
         super().__init__(window, controller.source, controller=controller)
         self.loading_settings = True
@@ -305,7 +308,7 @@ def gui(root):
 
 def portable_session(root):
     from .launcher_session import Session
-    root = Path(root).resolve()
+    root = Path(plain(resolved(root)))
     os.environ.update(portable.environment(root, portable.manifest(root)))
     os.environ['FREEVIDEO_LAUNCHER_HOME'] = str(root/'engine/launcher')
     class PortableSession(Session):
@@ -313,7 +316,7 @@ def portable_session(root):
 
         def __init__(self):
             controller = PortableController(root)
-            self.consent_path = root/'engine/portable-consent.json'
+            self.consent_path = io_path(root)/'engine/portable-consent.json'
             super().__init__(controller.source, controller=controller, smoke=True)
             self.smoke = False
             self.page = 'launcher'

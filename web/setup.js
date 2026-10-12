@@ -21,7 +21,7 @@ const failureText = value => {
             ? t('The installation plan changed: files in the installation folder changed after you confirmed the plan, so FreeVideo stopped instead of continuing with it. Click Detect & review, then Install / repair to review the new plan.',
                 '安装计划有变化：确认计划之后，安装位置里的文件又有变化，FreeVideo 因此停止，未按原计划继续。请先点击“检测并预览”，再点击“安装／修复”，查看新的计划。')
             : t('The installation plan changed: something changed after you confirmed the plan (for example the settings, the GPU or the free disk space), so FreeVideo stopped instead of continuing with it. Click Detect & review, then Install / repair to review the new plan.',
-                '安装计划有变化：确认计划之后，这台电脑的情况又有变化（例如设置、显卡或可用磁盘空间），FreeVideo 因此停止，未按原计划继续。请先点击“检测并预览”，再点击“安装／修复”，查看新的计划。');
+                '安装计划有变化：确认计划之后，设置、显卡或可用磁盘空间发生了变化，FreeVideo 因此停止，未按原计划继续。请先点击“检测并预览”，再点击“安装／修复”，查看新的计划。');
     }
     if (!matches.length) return text;
     const file = matches.at(-1)[1];

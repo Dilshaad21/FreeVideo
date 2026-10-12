@@ -20,7 +20,7 @@ const PLAIN_ERRORS = [
         summary: ['This LoRA changes parts of the model that the int8 version cannot merge yet, so it cannot be used for now. LoRAs that change only linear layers work.', '这个 LoRA 修改了 int8 模型目前还不能合并的部分，暂时无法使用。只修改线性层的 LoRA 可以正常使用。']},
     {key: 'fa4-update', message: 'The attention speed-up component on this computer needs an update. Run freevideo setup --fa4-guard in a terminal, then restart FreeVideo.',
         title: ['The attention speed-up component needs an update', '需要更新注意力加速组件'],
-        summary: ['The attention speed-up component on this computer needs an update. Run freevideo setup --fa4-guard in a terminal, then restart FreeVideo.', '这台电脑的注意力加速组件需要更新。请在终端运行 freevideo setup --fa4-guard，然后重新启动 FreeVideo。']},
+        summary: ['The attention speed-up component on this computer needs an update. Run freevideo setup --fa4-guard in a terminal, then restart FreeVideo.', '注意力加速组件需要更新。请在终端运行 freevideo setup --fa4-guard，然后重新启动 FreeVideo。']},
     {key: 'duration-too-short', message: 'The video must be at least 1.625 s long.',
         title: ['The video is too short', '视频时长太短'],
         summary: ['The video must be at least 1.625 s long.', '视频时长不能短于 1.625 秒。']},
@@ -233,7 +233,7 @@ export function failureAdvice(value, t, known = knownError(value)) {
             return row('resources', ['This video is too large for the free GPU memory', '这段视频超出了当前可用显存'],
                 ['Before generating, FreeVideo estimated the GPU memory this video needs, and it is more than the GPU has free right now.', 'FreeVideo 在开始生成前估算了所需显存，这段视频超过了显卡现在空闲的显存。'],
                 [`This computer can make ${en} right now. Change the duration or total pixels and generate again; closing other programs that use the GPU also frees memory.`,
-                 `这台电脑现在可以生成：${zh}。请调整时长或总像素后重新生成；关闭其他占用显卡的程序也可以腾出显存。`]);
+                 `现在可以生成：${zh}。请调整时长或总像素后重新生成；关闭其他占用显卡的程序也可以腾出显存。`]);
         }
         return row('resources', ['The request exceeds available memory', '当前任务的可用内存不足'],
             ['Before generating, FreeVideo estimated the GPU memory and RAM this task needs, and it is more than is available right now.', 'FreeVideo 在开始生成前估算了所需的显存和内存，这次任务超过了现在可用的部分。'],

@@ -12,6 +12,41 @@ from pathlib import Path
 import os
 import time
 
+from .macos_conditions import BLOCK_SECONDS_SCOPE, runtime_conditions
+from .sampling_progress import SamplingProgress
+
+
+class MacSamplingProgress(SamplingProgress):
+    """Retain every existing host block-start callback, including throttled events."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.block_seconds = []
+        self.conditions = []
+        self._block_started = None
+        self._blocks = []
+
+    def start(self):
+        self.conditions.append(runtime_conditions())
+        super().start()
+
+    def layer(self, index):
+        if len(self.completed) >= self.steps:
+            return
+        now = self.clock()
+        if self._block_started is not None:
+            self._blocks.append(round(now - self._block_started, 2))
+        self._block_started = now
+        super().layer(index)
+
+    def complete(self, seconds):
+        now = self.clock()
+        if self._block_started is not None:
+            self._blocks.append(round(now - self._block_started, 2))
+        self.block_seconds.append(self._blocks)
+        self._blocks, self._block_started = [], None
+        self.conditions.append(runtime_conditions())
+        super().complete(seconds)
+
 
 def upscale_latents(video, sampling, base, backend, checkpoint=None):
     """The same learned upscale/crop for resident and process-separated stages."""
@@ -453,7 +488,6 @@ class Engine:
                initial_latents=None, refine_steps=None, refine_schedule=None):
         import torch
         from .geometry import geometry, sampler_for_canvas
-        from .sampling_progress import SamplingProgress
         from .system import system_memory
         from src.inference.render import generate_latents
         if self.closed:
@@ -484,7 +518,7 @@ class Engine:
         active_steps = refine_steps if refining else self.steps
         canvas = geometry(width, height, frames=frames)
         sampler = sampler_for_canvas(generate_latents, width, height)
-        progress = SamplingProgress(active_steps, len(self.model.transformer_blocks),
+        progress = MacSamplingProgress(active_steps, len(self.model.transformer_blocks),
                                     offset=progress_offset, total=progress_total)
         class StepTimes(list):
             def append(owner, duration):
@@ -550,6 +584,8 @@ class Engine:
                         attention_calls={name: value - previous_calls[name]
                                          for name, value in self.attention.backend_calls.items()},
                         step_seconds=list(durations),
+                        block_seconds=progress.block_seconds, block_seconds_scope=BLOCK_SECONDS_SCOPE,
+                        conditions=progress.conditions,
                         load_seconds=self.load_seconds, residency=self._residency_metrics(residency, previous_residency),
                         text_refiner_residency=text_residency,
                         residency_scope='Repeated video blocks; one-use prompt weights reported separately',

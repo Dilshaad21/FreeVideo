@@ -22,6 +22,7 @@ import threading
 import time
 
 from . import processes
+from .long_paths import io_path
 
 START_DELAY = 30.
 MAX_DELAY = 600.
@@ -93,7 +94,7 @@ class BackgroundCompile:
         from .locking import runtime_lock
         while True:
             try:
-                with runtime_lock(self.lock, inherit=False):
+                with runtime_lock(io_path(self.lock), inherit=False):
                     return True
             except BlockingIOError:
                 if time.monotonic() >= deadline:
@@ -123,7 +124,7 @@ class BackgroundCompile:
                              'a generation request stops it.')
                 row = dict(started=time.time())
                 self.attempts.append(row)
-                with log.open('ab') as stream:
+                with io_path(log).open('ab') as stream:
                     process = self.process = processes.popen(
                         command, env=environment, cwd=cwd, stdin=subprocess.DEVNULL, stdout=stream,
                         stderr=subprocess.STDOUT, start_new_session=True, supervise=True)

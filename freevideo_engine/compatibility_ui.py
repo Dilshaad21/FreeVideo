@@ -1,26 +1,24 @@
 """Small native compatibility controls shared by the EXE and portable launcher."""
 from pathlib import Path
 
+from .long_paths import io_path, plain_text, plain_errors
 from .compatibility import Store, installed_identity, check_installation, LEVELS
 
 
+@plain_errors
 def notify(window, root, zh=True):
     from tkinter import messagebox
     root = Path(root)
-    if not (root/'machine.json').is_file():
+    if not (io_path(root)/'machine.json').is_file():
         return
     try:
         value = check_installation(root)
         if value.get('notice'):
-            level = value['level']
-            messagebox.showinfo('FreeVideo',
-                ('上次生成未正常结束，已自动开启兼容性设置（第 %d 档）。\n'
-                 '可在“兼容性设置”中调节或关闭。分辨率、时长和步数保持不变。' % level) if zh else
-                ('The previous generation ended unexpectedly. Compatibility level %d is now enabled.\n'
-                 'You can adjust or disable it in Compatibility settings. Resolution, duration and steps are unchanged.' % level), parent=window)
+            from .compatibility_copy import notice_text
+            messagebox.showinfo('FreeVideo', notice_text(value, zh), parent=window)
             Store(root).acknowledge(installed_identity(root), value['notice']['id'])
     except Exception as error:
-        messagebox.showerror('FreeVideo', str(error), parent=window)
+        messagebox.showerror('FreeVideo', plain_text(error), parent=window)
 
 
 def open_settings(window, root, zh=True):

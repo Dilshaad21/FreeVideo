@@ -13,6 +13,7 @@ import sys
 import time
 from urllib.parse import unquote, urlsplit
 
+from . import execution_paths
 from .hardware import GiB
 from .policy import BLOCK_BYTES
 from .monitoring import save
@@ -56,7 +57,7 @@ def state_path():
 def package_versions(python=None):
     if python and os.path.abspath(python) != os.path.abspath(sys.executable):
         code = 'import importlib.metadata as m,json; print(json.dumps({d.metadata["Name"].lower().replace("_","-"):d.version for d in m.distributions()}))'
-        result = subprocess.run([str(python), '-B', '-c', code], capture_output=True, text=True, timeout=15, check=True)
+        result = execution_paths.run([str(python), '-B', '-c', code], capture_output=True, text=True, timeout=15, check=True)
         installed = json.loads(result.stdout)
     else:
         installed = {d.metadata['Name'].lower().replace('_', '-'): d.version for d in importlib.metadata.distributions()}
@@ -102,8 +103,8 @@ def identity(machine, hardware):
     for checkout, ref, expected in ((machine['vdn_root'], 'HEAD', specs['vdn']['commit']),
             (machine['comfy_root'], 'HEAD', specs['encoder']['comfy_commit']),
             (str(Path(machine['vdn_root']) / 'diffusers'), 'HEAD^{tree}', specs['diffusers']['patched_tree'])):
-        observed_ref = subprocess.check_output(['git', '-C', checkout, 'rev-parse', ref], text=True, timeout=10).strip()
-        dirty = subprocess.check_output(['git', '-C', checkout, 'status', '--porcelain', '--untracked-files=no'], text=True, timeout=10)
+        observed_ref = execution_paths.check_output(['git', '-C', checkout, 'rev-parse', ref], text=True, timeout=10).strip()
+        dirty = execution_paths.check_output(['git', '-C', checkout, 'status', '--porcelain', '--untracked-files=no'], text=True, timeout=10)
         if observed_ref != expected or dirty:
             raise ValueError('Pinned model code changed; saved tuning cannot be reused: ' + checkout)
     return {'schema': SCHEMA, 'system': hardware.system,

@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlsplit
 import uuid
 import zipfile
 
+from . import execution_paths
 from . import proxy
 from .system import bootstrap_root
 
@@ -89,7 +90,7 @@ def probe(path, env):
             return dict(cached[1])
         from .windows_ux import external_python, hidden_console
         with external_python():
-            result = subprocess.run([str(path), '--disable', '--version'], env=env,
+            result = execution_paths.run([str(path), '--disable', '--version'], env=env,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 timeout=3, **hidden_console())
         code = result.returncode & 0xffffffff

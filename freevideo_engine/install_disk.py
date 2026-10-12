@@ -3,6 +3,7 @@ from pathlib import Path
 import hashlib
 import json
 
+from .long_paths import io_path, resolved
 from . import disk_space
 
 GiB = 1 << 30
@@ -62,11 +63,12 @@ FRONTEND_IN_PLACE_GIB = 5
 def frontend_in_place(root, comfy):
     """The launcher's ComfyUI environment for this ComfyUI exists: setup repairs or updates it in place."""
     try:
-        record = json.loads((Path(root) / 'launcher' / 'comfy-host.json').read_text(encoding='utf-8'))
-        environment = Path(record['environment'])
+        root, comfy = io_path(root), io_path(comfy)
+        record = json.loads((root / 'launcher' / 'comfy-host.json').read_text(encoding='utf-8'))
+        environment = io_path(record['environment'])
         identity = json.loads((environment / 'freevideo-host.json').read_text(encoding='utf-8'))
-        return (environment.resolve().parent == (Path(root) / 'envs').resolve() and Path(record['python']).is_file()
-                and Path(identity['comfy']).resolve() == Path(comfy).resolve())
+        return (environment.resolve().parent == (root / 'envs').resolve() and io_path(record['python']).is_file()
+                and resolved(identity['comfy']) == comfy.resolve())
     except (OSError, ValueError, KeyError, TypeError):
         return False
 

@@ -5,6 +5,7 @@ from contextlib import contextmanager, nullcontext
 import json
 import os
 import re
+import threading
 import time
 import weakref
 
@@ -184,6 +185,16 @@ class Slot:
     compute_done: object = None
 
 
+@dataclass
+class _HostRead:
+    """One layer being prepared ahead in a staging block."""
+
+    slot: Slot
+    future: object
+    from_drive: bool  # Not held in RAM as a view when it was queued.
+    lane: str = None  # 'drive' or 'ram' once the two are read ahead separately.
+
+
 # Live RAM that must stay free beside the one prepared block host read-ahead
 # holds. It used to borrow the 8 GiB weight-cache allowance, which no 16 GiB
 # machine reaches while sampling: a 16 GiB RTX 3060 Laptop reread all 21.6 GB
@@ -197,6 +208,15 @@ class Slot:
 # to 283-294 s for the request). The runtime check in _queue_host returns the
 # extra block under live pressure; read-ahead then shares the staging buffer.
 HOST_PREFETCH_HEADROOM = 1 * 2**30
+
+
+# A read from the drive that keeps the inference thread waiting this long means
+# the drive, not the GPU, sets the pace of those layers. From then on the next
+# layer that comes from the drive is read into the extra block as soon as that
+# block is free, past the layers RAM already holds, which keep going through the
+# staging buffer. Until a read is that slow, read-ahead stays one layer deep on
+# alternating blocks, as before.
+HOST_FILE_READ_WAIT = 0.2
 
 
 def _host_prefetch_fits(extra_bytes):
@@ -444,6 +464,13 @@ class LayerOffloader:
         self.host_prefetch_reads = 0
         self.host_prefetch_wait_seconds = 0.
         self.host_memory_checked = 0.
+        # Reads of drive-backed layers past the next streamed layer: their own
+        # thread, and the extra block while it is not being handed back.
+        self.host_file_ahead = bool(getattr(weight_source, 'reads_delay_compute', False))
+        self.host_file_executor = None
+        self.host_file_ahead_reads = 0
+        self.host_extra_returning = False
+        self.host_counters = threading.Lock()
         if (requested and not prefetch and sum(not p for p in self.pinned_layers) > 1
                 and getattr(weight_source, 'direct_read', False)
                 and getattr(weight_source, 'intermediate_dtype', None) is None
@@ -539,10 +566,11 @@ class LayerOffloader:
         # CPU writes must wait for the previous H2D read of this host plane.
         # They need not wait for GPU computation using the separate device plane.
         with torch.cuda.device(self.device):
+            waited = 0.
             if slot.copy_done is not None:
                 tick = time.monotonic()
                 slot.copy_done.synchronize()
-                self.host_buffer_wait_seconds += time.monotonic() - tick
+                waited = time.monotonic() - tick
             started = time.monotonic()
             if self.read_ahead is not None:
                 self.read_ahead.before(index)
@@ -552,22 +580,27 @@ class LayerOffloader:
                 with self.weight_source.layer(index, self.layout[index]) as weights:
                     for _, name, dtype, offset, count, _ in self.layout[index]:
                         slot.host[dtype][offset:offset + count].copy_(weights[name].reshape(-1))
+            read = 0
             for _, _, dtype, offset, count, _ in self.layout[index]:
                 counts[dtype] = offset + count
                 if direct:
-                    self.direct_read_bytes += count * slot.host[dtype].element_size()
-            if direct:
-                self.direct_read_layers += 1
+                    read += count * slot.host[dtype].element_size()
+            # The two read-ahead threads and the inference thread all fill.
+            with self.host_counters:
+                self.host_buffer_wait_seconds += waited
+                self.direct_read_bytes += read
+                self.direct_read_layers += int(bool(direct))
             if self.read_ahead is not None:
                 self.read_ahead.consumed(index)
             return slot, counts, time.monotonic() - started
 
     def _stop_host_prefetch(self):
-        if self.host_executor is not None:
-            for _, future in self.host_pending.values():
-                future.cancel()
-            self.host_executor.shutdown(wait=True, cancel_futures=True)
-            self.host_executor = None
+        for read in self.host_pending.values():
+            read.future.cancel()
+        for executor in (self.host_executor, self.host_file_executor):
+            if executor is not None:
+                executor.shutdown(wait=True, cancel_futures=True)
+        self.host_executor = self.host_file_executor = None
         for slot in self.host_slots:
             if slot.copy_done is not None:
                 slot.copy_done.synchronize()
@@ -575,8 +608,30 @@ class LayerOffloader:
         self.host_slots.clear()
         self.host_prefetch = False
 
+    def _free_host_slot(self):
+        """A staging block no queued read is filling, in the order blocks alternate."""
+        for _ in self.host_slots:
+            slot = self.host_slots[self.host_cursor % len(self.host_slots)]
+            self.host_cursor += 1
+            if all(slot is not read.slot for read in self.host_pending.values()):
+                return slot
+        raise RuntimeError('Every staging block is held by a queued read')
+
+    def _host_views(self):
+        return getattr(self.weight_source, 'host_views', None) or {}
+
+    def _submit_host(self, index, slot, lane=None):
+        executor = self.host_executor
+        if lane == 'drive':
+            if self.host_file_executor is None:
+                self.host_file_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='freevideo-host-read')
+            executor = self.host_file_executor
+        self.host_pending[index] = _HostRead(slot, executor.submit(self._fill_host, index, slot),
+                                             index not in self._host_views(), lane)
+        self.host_prefetch_reads += 1
+
     def _queue_host(self, start):
-        if not self.host_prefetch or self.host_pending:
+        if not self.host_prefetch:
             return
         now = time.monotonic()
         if len(self.host_slots) > 1 and now - self.host_memory_checked >= 1.:
@@ -586,21 +641,53 @@ class LayerOffloader:
                 # through the shared staging buffer holds no more memory than
                 # reading on demand does.
                 self.host_prefetch_shared_reason = 'live_host_pressure'
-                extra = self.host_slots.pop()
-                if extra.copy_done is not None:
-                    extra.copy_done.synchronize()
-                del extra
-                self.host_cursor = 0
-                from .torch_compat import empty_host_cache
-                empty_host_cache(torch)
-        for index in range(start, len(self.layers)):
-            if self.pinned_layers[index] or index in self.cached:
-                continue
-            slot = self.host_slots[self.host_cursor % len(self.host_slots)]
-            self.host_cursor += 1
-            self.host_pending[index] = (slot, self.host_executor.submit(self._fill_host, index, slot))
-            self.host_prefetch_reads += 1
-            break
+                self.host_extra_returning = True
+        if self.host_extra_returning and all(read.slot is not self.host_slots[-1] for read in self.host_pending.values()):
+            # A read already queued into the block is used first.
+            self.host_extra_returning = False
+            extra = self.host_slots.pop()
+            if extra.copy_done is not None:
+                extra.copy_done.synchronize()
+            del extra
+            self.host_cursor = 0
+            from .torch_compat import empty_host_cache
+            empty_host_cache(torch)
+        ahead = [index for index in range(start, len(self.layers))
+                 if not self.pinned_layers[index] and index not in self.cached]
+        if not ahead:
+            return
+        if not (self.host_file_ahead and len(self.host_slots) > 1 and not self.host_extra_returning
+                and self.read_ahead is None):
+            if not self.host_pending:
+                self._submit_host(ahead[0], self._free_host_slot())
+            return
+        # Layers RAM holds are copied in a fraction of a layer's compute, so
+        # the staging buffer alone keeps them one layer ahead. The extra block
+        # goes to the drive: the next layer that has to be read from it starts
+        # as soon as the block's last upload is done, however many RAM-backed
+        # layers run in between, and on a thread of its own so that those
+        # layers do not queue behind the read. One drive read runs at a time.
+        # With 10 of 50 layers read from the drive every step, spread through
+        # the model by loading, and each read taking 3.3 times a second-pass
+        # layer's compute, 1344x768x243 went from 26.4-27.6 to 18.2-20.1 s per
+        # second-pass step (18.2 s without the reads) and from 16.4 to 12.5 s
+        # per first-pass step, where the ten reads alone take 12 s, on an RTX
+        # PRO 6000 with identical output. One layer ahead, each of those reads
+        # overlapped a single layer's compute and the GPU waited for the rest.
+        views = self._host_views()
+        shared, extra = self.host_slots[0], self.host_slots[-1]
+        near = ahead[0]
+        target = next((index for index in ahead if index not in views), None)
+        if (target is not None and target not in self.host_pending
+                and not any(read.lane == 'drive' for read in self.host_pending.values())):
+            if target == near and not self.host_pending:
+                self._submit_host(target, self._free_host_slot(), 'drive')
+            elif all(read.slot is not extra for read in self.host_pending.values()):
+                self._submit_host(target, extra, 'drive')
+                self.host_file_ahead_reads += int(target != near)
+        if (near in views and near not in self.host_pending
+                and all(read.slot is not shared and read.lane == 'drive' for read in self.host_pending.values())):
+            self._submit_host(near, shared, 'ram')
 
     def _stage(self, index):
         slot = self.slots[index % len(self.slots)]
@@ -627,14 +714,18 @@ class LayerOffloader:
                       and self.weight_source.stage_into(index, self.layout[index], slot.host))
             if staged:
                 if index in self.host_pending:
-                    _, future = self.host_pending.pop(index)
+                    read = self.host_pending.pop(index)
                     tick = time.monotonic()
-                    host_slot, counts, host_seconds = future.result()
-                    self.host_prefetch_wait_seconds += time.monotonic() - tick
+                    host_slot, counts, host_seconds = read.future.result()
+                    waited = time.monotonic() - tick
+                    self.host_prefetch_wait_seconds += waited
+                    if read.from_drive and waited > HOST_FILE_READ_WAIT and not self.host_file_ahead:
+                        self.host_file_ahead = True
+                        if hasattr(self.weight_source, 'reads_delay_compute'):
+                            # The next pass of this request starts with it on.
+                            self.weight_source.reads_delay_compute = True
                 else:
-                    host_slot = self.host_slots[self.host_cursor % len(self.host_slots)]
-                    self.host_cursor += 1
-                    host_slot, counts, host_seconds = self._fill_host(index, host_slot)
+                    host_slot, counts, host_seconds = self._fill_host(index, self._free_host_slot())
             elif direct:
                 self.direct_read_layers += 1
                 for _, _, dtype, offset, count, _ in self.layout[index]:
@@ -751,6 +842,9 @@ class LayerOffloader:
                 'host_prefetch_wait_seconds': self.host_prefetch_wait_seconds,
                 'host_prefetch_buffer_bytes': sum(t.numel() * t.element_size()
                     for slot in self.host_slots[1:] for t in slot.host.values()),
+                # Drive-backed layers read ahead past RAM-backed ones.
+                'host_prefetch_file_ahead': self.host_file_ahead,
+                'host_prefetch_file_ahead_reads': self.host_file_ahead_reads,
                 'host_prefetch_disabled_reason': self.host_prefetch_disabled_reason,
                 'host_prefetch_shared_reason': self.host_prefetch_shared_reason,
                 'disk_read_ahead': self.read_ahead.stats() if self.read_ahead is not None else {'enabled': False},

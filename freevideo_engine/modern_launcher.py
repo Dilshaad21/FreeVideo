@@ -6,6 +6,8 @@ import sys
 import time
 import traceback
 
+from .long_paths import io_path, plain
+
 
 def theme():
     """branding.py's palette for QML, so the launcher and ComfyUI views match.
@@ -63,8 +65,8 @@ def create_ui(session, *, show=True):
     # The Linux AppImage carries the launcher's Chinese characters for desktops
     # without a Chinese font; a complete system font still comes first.
     from PySide6.QtGui import QFontDatabase
-    for path in sorted((Path(__file__).parent / 'assets/fonts').glob('*.otf')):
-        for family in QFontDatabase.applicationFontFamilies(QFontDatabase.addApplicationFont(str(path))):
+    for path in sorted((io_path(Path(__file__).parent) / 'assets/fonts').glob('*.otf')):
+        for family in QFontDatabase.applicationFontFamilies(QFontDatabase.addApplicationFont(plain(path))):
             if family not in families:
                 families.append(family)
     font.setFamilies(families + ['sans-serif'])
@@ -88,9 +90,9 @@ def create_ui(session, *, show=True):
         def state(self):
             return self.value
 
-        def invoke(self, function, *args):
+        def invoke(self, function, *args, **kwargs):
             try:
-                function(*args)
+                function(*args, **kwargs)
             except Exception:
                 session.error = traceback.format_exc()
             self.refresh()
@@ -117,7 +119,14 @@ def create_ui(session, *, show=True):
             except Exception:
                 # A failed status read must remain copyable and not kill the UI.
                 session.error = traceback.format_exc()
-                self.value = dict(self.value, error=session.error)
+                from .offline_errors import alias_failure
+                if alias_failure(session.error):
+                    # The card says what to do; the details keep the cause.
+                    from .failure_details import launcher_failure
+                    zh = session.language.startswith('zh')
+                    self.value = dict(self.value, error=session.error, failure=launcher_failure(session.error, zh=zh))
+                else:
+                    self.value = dict(self.value, error=session.error)
                 self.changed.emit()
 
         @Slot(str, 'QVariant')
@@ -221,7 +230,12 @@ def create_ui(session, *, show=True):
             # A licence may be a text file on this computer rather than a web page.
             from .component_licenses import is_file
             from .windows_ux import open_browser, open_text
-            self.invoke(open_text if is_file(value) else open_browser, value)
+            if is_file(value):
+                # A text inside the installation in use is opened through that installation's folder.
+                engine = session.installation_engine()
+                self.invoke(open_text, value, **(dict(engine=engine) if engine else {}))
+            else:
+                self.invoke(open_browser, value)
 
         @Slot(str)
         def selectSource(self, value):
@@ -238,6 +252,10 @@ def create_ui(session, *, show=True):
         @Slot(int, bool)
         def compatibility(self, level, automatic):
             self.invoke(session.set_compatibility, level, automatic)
+
+        @Slot(int)
+        def compatibilityLevel(self, level):
+            self.invoke(session.set_compatibility_level, level)
 
         @Slot(str)
         def update(self, token):
@@ -352,7 +370,7 @@ def smoke_test(app, engine, window, bridge, destination):
         window.setProperty('licensesOpen', False)
         rows = licences.bundle(destination, dict(files=[dict(path=name) for name in ('cudart64_13.dll', 'cudnn64_9.dll', 'libiomp5md.dll')]))
         texts = {row['key']: row['link'] for row in rows[2:]}
-        missing = {key: link for key, link in texts.items() if not licences.is_file(link) or not Path(link).is_file()}
+        missing = {key: link for key, link in texts.items() if not licences.is_file(link) or not io_path(link).is_file()}
         if len(texts) != 4 or missing:
             raise RuntimeError('Packaged licence texts are missing: %r' % (missing or texts))
         session.page = 'comfy'
@@ -470,7 +488,7 @@ def main(session=None):
     connect = json.loads(sys.argv[sys.argv.index('--smoke-connect') + 1]) if smoke and '--smoke-connect' in sys.argv else None
     from .desktop_runtime import launcher_root
     portable_root = Path(sys.executable).parent
-    if session is None and getattr(sys, 'frozen', False) and (portable_root / 'portable.json').is_file() and not smoke:
+    if session is None and getattr(sys, 'frozen', False) and (io_path(portable_root) / 'portable.json').is_file() and not smoke:
         from .portable_launcher import portable_session
         session = portable_session(portable_root)
     if not smoke and session is None:

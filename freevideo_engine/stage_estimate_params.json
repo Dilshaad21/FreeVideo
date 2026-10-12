@@ -1,0 +1,847 @@
+{
+  "format_version": 2,
+  "gpu_speed_table": {
+    "RTX 3060": {
+      "fp16_dense_tflops": 51.0,
+      "int8_dense_tops": 102.0,
+      "G_spec": 0.5379746835443038,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.5207888197855812,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 3060 Ti": {
+      "fp16_dense_tflops": 64.8,
+      "int8_dense_tops": 129.6,
+      "G_spec": 0.6835443037974683,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.593229315742704,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 3070": {
+      "fp16_dense_tflops": 81.3,
+      "int8_dense_tops": 162.6,
+      "G_spec": 0.8575949367088608,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.7130407414807,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 3070 Ti": {
+      "fp16_dense_tflops": 87.0,
+      "int8_dense_tops": 174.0,
+      "G_spec": 0.9177215189873418,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.8190431847292093,
+      "training_requests": 2,
+      "training_groups": 1
+    },
+    "RTX 3080": {
+      "fp16_dense_tflops": 119.1,
+      "int8_dense_tops": 238.2,
+      "G_spec": 1.2563291139240507,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.2563291139240507,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 3090": {
+      "fp16_dense_tflops": 142.3,
+      "int8_dense_tops": 284.6,
+      "G_spec": 1.5010548523206753,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.2688664948864776,
+      "training_requests": 8,
+      "training_groups": 1
+    },
+    "RTX 4060": {
+      "fp16_dense_tflops": 60.5,
+      "int8_dense_tops": 121.0,
+      "G_spec": 0.6381856540084389,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.5648065462023033,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 4060 Ti": {
+      "fp16_dense_tflops": 88.2,
+      "int8_dense_tops": 176.4,
+      "G_spec": 0.9303797468354431,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.7682598263137621,
+      "training_requests": 8,
+      "training_groups": 1
+    },
+    "RTX 4070": {
+      "fp16_dense_tflops": 116.6,
+      "int8_dense_tops": 233.2,
+      "G_spec": 1.229957805907173,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.9722768246324283,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 4070 SUPER": {
+      "fp16_dense_tflops": 141.9,
+      "int8_dense_tops": 283.8,
+      "G_spec": 1.4968354430379749,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.3674053723296804,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 4070 Ti": {
+      "fp16_dense_tflops": 160.4,
+      "int8_dense_tops": 320.8,
+      "G_spec": 1.6919831223628694,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.6919831223628694,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 4080": {
+      "fp16_dense_tflops": 195.0,
+      "int8_dense_tops": 390.0,
+      "G_spec": 2.0569620253164556,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 2.0569620253164556,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 4090": {
+      "fp16_dense_tflops": 330.3,
+      "int8_dense_tops": 660.6,
+      "G_spec": 3.4841772151898738,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 3.4841772151898738,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 5050": {
+      "fp16_dense_tflops": 42.0,
+      "int8_dense_tops": 84.0,
+      "G_spec": 0.44303797468354433,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.44303797468354433,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 5060": {
+      "fp16_dense_tflops": 76.0,
+      "int8_dense_tops": 152.0,
+      "G_spec": 0.8016877637130801,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.6355560226806366,
+      "training_requests": 2,
+      "training_groups": 1
+    },
+    "RTX 5060 Ti": {
+      "fp16_dense_tflops": 94.8,
+      "int8_dense_tops": 189.6,
+      "G_spec": 1.0,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.0,
+      "training_requests": 77,
+      "training_groups": 1
+    },
+    "RTX 5070": {
+      "fp16_dense_tflops": 123.5,
+      "int8_dense_tops": 247.0,
+      "G_spec": 1.3027426160337554,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.3027426160337554,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 5070 Ti": {
+      "fp16_dense_tflops": 175.8,
+      "int8_dense_tops": 351.6,
+      "G_spec": 1.8544303797468356,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.7506137720138786,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 5080": {
+      "fp16_dense_tflops": 225.1,
+      "int8_dense_tops": 450.2,
+      "G_spec": 2.3744725738396624,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 2.3744725738396624,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 5090": {
+      "fp16_dense_tflops": 419.0,
+      "int8_dense_tops": 838.0,
+      "G_spec": 4.419831223628692,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 4.253227592576185,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX PRO 5000 72GB Blackwell": {
+      "fp16_dense_tflops": 258.0,
+      "int8_dense_tops": 516.0,
+      "G_spec": 2.7215189873417724,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 2.7812599045046094,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 3060 Laptop GPU": {
+      "fp16_dense_tflops": 42.0,
+      "int8_dense_tops": 84.0,
+      "G_spec": 0.3544303797468355,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.3544303797468355,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 3070 Laptop GPU": {
+      "fp16_dense_tflops": 66.4,
+      "int8_dense_tops": 132.8,
+      "G_spec": 0.5603375527426161,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.3234973037813407,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX A5000 Laptop GPU": {
+      "fp16_dense_tflops": 77.9,
+      "int8_dense_tops": 155.8,
+      "G_spec": 0.6573839662447258,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.6075734032022507,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 4060 Laptop GPU": {
+      "fp16_dense_tflops": 58.2,
+      "int8_dense_tops": 116.4,
+      "G_spec": 0.4911392405063292,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.4630326335248195,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 4070 Laptop GPU": {
+      "fp16_dense_tflops": 80.2,
+      "int8_dense_tops": 160.4,
+      "G_spec": 0.6767932489451478,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.5684578106515071,
+      "training_requests": 3,
+      "training_groups": 1
+    },
+    "RTX 5050 Laptop GPU": {
+      "fp16_dense_tflops": 40.0,
+      "int8_dense_tops": 80.0,
+      "G_spec": 0.3375527426160338,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.14655919362074646,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 5060 Laptop GPU": {
+      "fp16_dense_tflops": 66.7,
+      "int8_dense_tops": 133.4,
+      "G_spec": 0.5628691983122364,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.3519458489403197,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 5070 Laptop GPU": {
+      "fp16_dense_tflops": 79.3,
+      "int8_dense_tops": 158.6,
+      "G_spec": 0.6691983122362869,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.6163691196524563,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 5070 Ti Laptop GPU": {
+      "fp16_dense_tflops": 119.1,
+      "int8_dense_tops": 238.2,
+      "G_spec": 1.0050632911392405,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.0058995347831903,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 5080 Laptop GPU": {
+      "fp16_dense_tflops": 152.1,
+      "int8_dense_tops": 304.2,
+      "G_spec": 1.2835443037974683,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.3812355985451874,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX 5090 Laptop GPU": {
+      "fp16_dense_tflops": 202.0,
+      "int8_dense_tops": 404.0,
+      "G_spec": 1.7046413502109705,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "rounded architecture-derived nominal public-spec prior; offline, unverified",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.7046413502109705,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "Apple M4 Max": {
+      "fp16_dense_tflops": null,
+      "int8_dense_tops": null,
+      "G_spec": 1.0,
+      "laptop": false,
+      "provenance": "separate Metal backend; no CUDA tensor-rate equivalence",
+      "G": 1.0,
+      "training_requests": 1,
+      "training_groups": 1
+    },
+    "RTX PRO 6000 Blackwell": {
+      "fp16_dense_tflops": 500.0,
+      "int8_dense_tops": 1000.0,
+      "G_spec": 5.274261603375527,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 4000 sparse FP4 AI TOPS; dense FP16 = 4000/8 = 500.0 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8. Source: https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000/ Server Edition publishes 1 PFLOP sparse FP16/BF16 (500 dense TFLOPS): https://www.nvidia.com/en-us/data-center/rtx-pro-6000-blackwell-server-edition/ . Server/workstation share this nominal compute prior.",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 5.274261603375527,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX PRO 6000 Blackwell Max-Q": {
+      "fp16_dense_tflops": 438.875,
+      "int8_dense_tops": 877.75,
+      "G_spec": 4.62948312236287,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 3511 sparse FP4 AI TOPS; dense FP16 = 3511/8 = 438.875 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8. Source: https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000-max-q/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 4.62948312236287,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX PRO 5000 Blackwell": {
+      "fp16_dense_tflops": 258.0,
+      "int8_dense_tops": 516.0,
+      "G_spec": 2.7215189873417724,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 2064 sparse FP4 AI TOPS; dense FP16 = 2064/8 = 258.0 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8. Source: https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-5000/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 2.7215189873417724,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX PRO 4500 Blackwell": {
+      "fp16_dense_tflops": 202.125,
+      "int8_dense_tops": 404.25,
+      "G_spec": 2.132120253164557,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 1617 sparse FP4 AI TOPS; dense FP16 = 1617/8 = 202.125 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8. Source: https://www.nvidia.com/content/dam/en-zz/Solutions/data-center/rtx-pro-4500-blackwell/workstation-datasheet-blackwell-rtx-pro-4500-we-nvidia-us-5108623-web.pdf",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 2.132120253164557,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX PRO 4000 Blackwell": {
+      "fp16_dense_tflops": 161.25,
+      "int8_dense_tops": 322.5,
+      "G_spec": 1.7009493670886076,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 1290 sparse FP4 AI TOPS; dense FP16 = 1290/8 = 161.25 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8. Source: https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-4000/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.7009493670886076,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX PRO 4000 Blackwell SFF": {
+      "fp16_dense_tflops": 96.25,
+      "int8_dense_tops": 192.5,
+      "G_spec": 1.015295358649789,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 770 sparse FP4 AI TOPS; dense FP16 = 770/8 = 96.25 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8. Source: https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-4000-sff/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.015295358649789,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX PRO 2000 Blackwell": {
+      "fp16_dense_tflops": 68.125,
+      "int8_dense_tops": 136.25,
+      "G_spec": 0.7186181434599156,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 545 sparse FP4 AI TOPS; dense FP16 = 545/8 = 68.125 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8. Source: https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-2000/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.7186181434599156,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 4080 SUPER": {
+      "fp16_dense_tflops": 209.0,
+      "int8_dense_tops": 418.0,
+      "G_spec": 2.2046413502109705,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 836 sparse INT8 AI TOPS; dense FP16 = 836/4 = 209.0 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8. Source: https://www.nvidia.com/en-us/geforce/graphics-cards/compare/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 2.2046413502109705,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 4070 Ti SUPER": {
+      "fp16_dense_tflops": 176.5,
+      "int8_dense_tops": 353.0,
+      "G_spec": 1.8618143459915613,
+      "laptop": false,
+      "laptop_utilization_prior": 1.0,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 706 sparse INT8 AI TOPS; dense FP16 = 706/4 = 176.5 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8. Source: https://www.nvidia.com/en-us/geforce/graphics-cards/compare/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.8618143459915613,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 4090 Laptop GPU": {
+      "fp16_dense_tflops": 171.5,
+      "int8_dense_tops": 343.0,
+      "G_spec": 1.4472573839662448,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 686 sparse INT8 AI TOPS; dense FP16 = 686/4 = 171.5 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8*0.8 laptop utilization prior. Source: https://www.nvidia.com/en-us/geforce/laptops/compare/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.4472573839662448,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 4080 Laptop GPU": {
+      "fp16_dense_tflops": 135.5,
+      "int8_dense_tops": 271.0,
+      "G_spec": 1.1434599156118146,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 542 sparse INT8 AI TOPS; dense FP16 = 542/4 = 135.5 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8*0.8 laptop utilization prior. Source: https://www.nvidia.com/en-us/geforce/laptops/compare/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 1.1434599156118146,
+      "training_requests": 0,
+      "training_groups": 0
+    },
+    "RTX 4050 Laptop GPU": {
+      "fp16_dense_tflops": 48.5,
+      "int8_dense_tops": 97.0,
+      "G_spec": 0.409282700421941,
+      "laptop": true,
+      "laptop_utilization_prior": 0.8,
+      "provenance": "architecture-derived nominal NVIDIA public-spec prior; no measured training requests",
+      "comment": "NVIDIA nominal boost 194 sparse INT8 AI TOPS; dense FP16 = 194/4 = 48.5 TFLOPS, dense INT8 = 2*FP16; G_spec = FP16/94.8*0.8 laptop utilization prior. Source: https://www.nvidia.com/en-us/geforce/laptops/compare/",
+      "rate_uncertainty": "approximately +/-25%; laptop effective speed often wider",
+      "G": 0.409282700421941,
+      "training_requests": 0,
+      "training_groups": 0
+    }
+  },
+  "step": {
+    "bc_normalized": [
+      53.02633687336147,
+      18.512278324043034
+    ],
+    "s": [
+      0.3628463125584906,
+      5.673596543037182,
+      0.0,
+      1.5771193358383282,
+      5.146406599311984
+    ],
+    "b_seconds_per_token": 0.000730631846248918,
+    "c_seconds_per_token_squared": 3.51458308076312e-09
+  },
+  "first": {
+    "1": [
+      5.667274570715307,
+      0.0,
+      2.555895622421369
+    ],
+    "2": [
+      1.4333251445342854,
+      0.02535875399143411,
+      4.571770191909305
+    ]
+  },
+  "pass_wall_overhead": {
+    "1": 1.1343244000090635,
+    "2": 0.807833600032609
+  },
+  "upscale": [
+    1.3925898807884207,
+    3.767907218745735,
+    2.3609589947869782
+  ],
+  "video_decode": {
+    "coef": [
+      3.1540430242918114,
+      0.34777095886325715,
+      0.0
+    ],
+    "ram16_multiplier": 3.0
+  },
+  "decode": {
+    "coef": [
+      12.236062438391375,
+      0.3768752240637105,
+      0.0
+    ],
+    "ram16_multiplier": 3.0
+  },
+  "encode": [
+    58.970469477191244,
+    23.365413646684626,
+    25.767529484087184,
+    5.895970153707906
+  ],
+  "load": [
+    18.861309755267882,
+    20.484668698553154,
+    14.860735681704988,
+    0.5,
+    2.6514297905683555
+  ],
+  "save_other": 15.606161100004101,
+  "apple": {
+    "step_bc": [
+      518.3697621308827,
+      455.7612479359653
+    ],
+    "step_fixed": 0.0,
+    "video_decode": [
+      0.0,
+      1.8049468919344624
+    ],
+    "decode": [
+      0.0,
+      1.9429229278016131
+    ],
+    "training_requests": 1
+  },
+  "uncertainty": {
+    "prior": {
+      "encode": [
+        0.8667104381892639,
+        2.6829023101372345,
+        86
+      ],
+      "load": [
+        0.7756754568021302,
+        2.167389699204247,
+        118
+      ],
+      "upscale": [
+        0.8423626023578648,
+        2.0377246042595116,
+        88
+      ],
+      "decode": [
+        0.9481693673968302,
+        1.5792274827930786,
+        118
+      ],
+      "video_decode": [
+        1.0070416456117262,
+        1.404106089855182,
+        118
+      ],
+      "total": [
+        1.0831900128935448,
+        1.9821958506492763,
+        118
+      ],
+      "pass1": [
+        1.0702964473871903,
+        1.898445893716351,
+        116
+      ],
+      "pass1_warm_step": [
+        1.0758933411562723,
+        1.7922893590696019,
+        116
+      ],
+      "pass2": [
+        0.9866929787145726,
+        1.5046582403128717,
+        88
+      ],
+      "pass2_warm_step": [
+        0.9551794655619846,
+        1.394761697130706,
+        88
+      ]
+    },
+    "live_pass1": {
+      "upscale": [
+        0.9094411502542656,
+        2.052016278392315,
+        86
+      ],
+      "pass2": [
+        0.7710499588340138,
+        1.2045052366185338,
+        86
+      ],
+      "video_decode": [
+        0.8638387668907984,
+        1.1587356142037288,
+        116
+      ],
+      "decode": [
+        0.8059200577286844,
+        1.1538384121282341,
+        116
+      ],
+      "pass1": [
+        0.9122358585825523,
+        1.0035965736783319,
+        116
+      ],
+      "pass2_warm_step": [
+        0.6548425387738285,
+        1.2216660426106098,
+        86
+      ],
+      "total": [
+        0.9007780259129602,
+        1.1870504377616715,
+        116
+      ]
+    },
+    "live_pass2": {
+      "video_decode": [
+        0.9080252507974729,
+        1.2697535287824175,
+        88
+      ],
+      "decode": [
+        0.9010158541995446,
+        1.2684269376672286,
+        88
+      ]
+    }
+  },
+  "live_mode": "compute",
+  "fit_counts": {
+    "requests": 118,
+    "warm_pass_observations": 204,
+    "groups": 24,
+    "residual_p20_p50_p80": [
+      12.707398799987278,
+      15.606161100004101,
+      22.069393300002865
+    ]
+  },
+  "v2": {
+    "ratio": {
+      "ratio": [
+        1.3990689533765748,
+        0.23860511677329715,
+        -0.3821800848897214,
+        -0.31456848433651297
+      ],
+      "ratio_offload": [
+        1.568865168066507,
+        0.24968661209666881,
+        -0.3712029383386699,
+        -0.3082697221309762,
+        -0.18946933080231615
+      ]
+    },
+    "physical_cs": [
+      9.671942288440452,
+      0.7163619375584906,
+      10.394206166736087,
+      0.0,
+      1.4501953125,
+      7.704532535884055
+    ],
+    "decode": {
+      "decode": {
+        "free": {
+          "coef": [
+            8.747419662845598,
+            0.4260787400368224,
+            0.0
+          ],
+          "ram16_multiplier": 2.0954275789625574
+        },
+        "log_prior": [
+          0.2627808950946773,
+          0.8282273967516215,
+          0.931088837662092,
+          0.3163177103103201,
+          -0.0952843851055781,
+          0.05797116119613941
+        ],
+        "log_live": [
+          0.358156201743166,
+          0.809232829195133,
+          0.8824411920706745,
+          0.26864789494125835,
+          -0.12646376216683672,
+          0.03167687172195593,
+          0.4445769667207636
+        ]
+      },
+      "video_decode": {
+        "free": {
+          "coef": [
+            0.897942832464085,
+            0.3935869705580935,
+            0.0
+          ],
+          "ram16_multiplier": 1.9175162950078457
+        },
+        "log_prior": [
+          -0.6053916109261319,
+          0.9502890056312934,
+          1.046248334043838,
+          0.3380746097246319,
+          -0.02258427868230822,
+          0.07600251230300796
+        ],
+        "log_live": [
+          -0.5443348813940208,
+          0.9373105484268757,
+          0.9921500532796445,
+          0.2770921303984208,
+          -0.045634813241097354,
+          0.05168492663118808,
+          0.39668263768508455
+        ]
+      }
+    },
+    "warmup": {
+      "1": 0.9596869464322852,
+      "2": 1.0
+    },
+    "selection": {
+      "prior_pass2": "original",
+      "live_pass2": "ratio_offload",
+      "prior_decode": "log_prior",
+      "live_decode": "log_live",
+      "prior_video_decode": "free_static",
+      "live_video_decode": "log_live",
+      "warmup": "median"
+    },
+    "selection_rule": "mean of report/test-box median ARE; mean p90 tie-break; priors LOGO GPU+OS, live LORO; SELECTION.md"
+  },
+  "uncertainty_note": "OOF GPU+OS-balanced marginal 20/80 actual/predicted quantiles; exploratory selection, no independent coverage guarantee."
+}

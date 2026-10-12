@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import sys
 
+from .long_paths import io_path, plain_text
 from .diagnostics import Redactor
 
 
@@ -22,6 +23,14 @@ def redacted_launcher_error(value, replacements=()):
         except ValueError:
             pass
     return redactor.text(value)
+
+
+def display_launcher_error(value, *, zh=False, replacements=()):
+    """UI text only; diagnostics retain redacted_launcher_error's full cause."""
+    from .offline_errors import alias_failure, guidance
+    if alias_failure(value):
+        return guidance('runtime-alias', zh)
+    return redacted_launcher_error(value, replacements)
 
 
 def setup_command_failure(label, log, exit_code):
@@ -198,6 +207,10 @@ def launcher_failure(value, *, zh=False, other_disk=False, disk_name='', can_rep
     """
     if not value:
         return dict(title='', detail='', action='', kind='')
+    from .offline_errors import alias_failure, guidance
+    if alias_failure(value):
+        return dict(title=guidance('title', zh), detail=guidance('runtime-alias', zh),
+                    action='', kind='runtime-alias')
     text = str(value)
     summary = text.partition(STEP_OUTPUT)[0]
     from .comfy_launcher_runtime import OlderLauncher
@@ -392,6 +405,7 @@ def launcher_failure(value, *, zh=False, other_disk=False, disk_name='', can_rep
 
 
 def _read(path, limit, *, tail=False):
+    path = io_path(path)
     try:
         with path.open('rb') as stream:
             if tail:
@@ -399,9 +413,9 @@ def _read(path, limit, *, tail=False):
                 start = max(0, stream.tell() - limit)
                 stream.seek(start)
                 value = stream.read(limit).decode('utf-8', errors='replace')
-                return value.partition('\n')[2] if start and '\n' in value else value
+                return plain_text(value.partition('\n')[2] if start and '\n' in value else value)
             raw = stream.read(limit + 1)
-            return raw.decode('utf-8', errors='replace') if len(raw) <= limit else ''
+            return plain_text(raw.decode('utf-8', errors='replace')) if len(raw) <= limit else ''
     except OSError:
         return ''
 

@@ -22,6 +22,8 @@
 .fv-generation-times>span[hidden],.fv-generation-status[hidden],.fv-generation-times[hidden]{display:none!important}
 /* No reserved blank rows or clipped copy. Browser checks measure actual lines. */
 .fv-generation-status{box-sizing:border-box;width:100%;flex:none;margin-top:10px;font-size:12px;line-height:18px;color:var(--fv-muted,#a2abba);text-align:center;text-wrap:balance}
+.fv-generation-compatibility{box-sizing:border-box;width:100%;flex:none;margin-top:10px;font-size:12px;line-height:18px;color:var(--fv-ink,#e8edf5);text-align:center;text-wrap:balance}
+.fv-generation-compatibility[hidden]{display:none!important}
 .fv-generation-live{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 /* Studio shows progress with the preview's rising wave, so its bar stays
    hidden (studio.css); the node view keeps the bar under the percentage. */
@@ -33,6 +35,11 @@
    The wave reads --fv-progress from this element, not its size. */
 .fv-studio .fv-stage .fv-generation-progress.fv-generation-compact{inset:auto;top:50%;left:50%;transform:translate(-50%,-50%);box-sizing:border-box;width:max-content;min-width:min(100%,320px);max-width:100%;padding:18px 40px;background:radial-gradient(ellipse 60% 60% at 50% 50%,rgba(7,19,32,.55),transparent 72%)}
 .fv-studio .fv-stage[data-short=true] .fv-generation-progress.fv-generation-compact{padding:8px 16px}
+/* A narrow preview must grow for the extra persistent sentence, including a
+   simultaneous retry hint. Return to the video's aspect ratio after it ends. */
+.fv-studio .fv-preview-space:has(.fv-generation-compatibility:not([hidden])){min-height:min-content;max-height:none}
+.fv-studio .fv-stage:has(.fv-generation-compatibility:not([hidden])){min-width:0;min-height:min-content}
+.fv-studio .fv-stage .fv-generation-progress.fv-generation-compact:has(.fv-generation-compatibility:not([hidden])){position:relative;inset:auto;transform:none;width:100%;min-width:0}
 /* The small bar keeps its 160 px in the narrower box. */
 .fv-studio .fv-stage .fv-generation-compact .fv-generation-mini{max-width:100%}
 .fv-encoder-path{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 ui-monospace,monospace;color:var(--fv-muted);user-select:text}
@@ -47,7 +54,7 @@
 /* The extra class also overrides Studio's quiet button styling. */
 .fv-report-download.fv-quiet[data-emphasis=true]{background:transparent;border:1px solid var(--fv-border,#ffffff2e);color:var(--fv-ink);padding:5px 12px;border-radius:var(--fv-r-sm,6px);font:inherit;font-size:12px;cursor:pointer;flex-shrink:0}
 .fv-report-download.fv-quiet[data-emphasis=true]:hover:not(:disabled){border-color:var(--fv-muted,#a2abba)}
-.fv-generation-progress:lang(zh) :is(.fv-generation-label,.fv-generation-status){word-break:keep-all;overflow-wrap:anywhere}
+.fv-generation-progress:lang(zh) :is(.fv-generation-label,.fv-generation-status,.fv-generation-compatibility){word-break:keep-all;overflow-wrap:anywhere}
 /* Small bar under the stage line: slow stages only, no number. A light track
    shows on the dark card and on Studio's wave alike. */
 .fv-generation-mini{position:relative;width:160px;max-width:60%;height:3px;margin:8px auto 0;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden}

@@ -106,7 +106,12 @@ class TableCache:
                         from src.inference.render import KEYFRAME_NOISE_AUG
                         if old.get('keyframe_noise_aug') != KEYFRAME_NOISE_AUG:
                             continue
-                    legacy_times = [t.tolist() for t in schedule_timesteps(steps, device='cpu', task=old['task'])]
+                    # A legacy table follows the grid this machine's own linspace
+                    # gave the version that wrote it. Where that is not the
+                    # engine's grid the table belongs to other timesteps: keep
+                    # it on disk and do not relabel it.
+                    legacy_times = [t.tolist() for t in schedule_timesteps(steps, device='cpu', task=old['task'],
+                                                                          upstream_grid=True)]
                     if legacy_times != rows:
                         continue
                     files = []
@@ -219,12 +224,15 @@ class TableCache:
 
 
 @torch.no_grad()
-def schedule_timesteps(steps, video_shift=12., audio_shift=3., device='cuda', task='t2va'):
+def schedule_timesteps(steps, video_shift=12., audio_shift=3., device='cuda', task='t2va', upstream_grid=False):
     from .media_request import TASKS
     if task not in TASKS:
         raise ValueError('Unsupported AdaLN task')
-    from diffusers import MiniMaxH3Scheduler
-    video, audio = MiniMaxH3Scheduler(shift=video_shift), MiniMaxH3Scheduler(shift=audio_shift)
+    if upstream_grid:
+        from diffusers import MiniMaxH3Scheduler as scheduler
+    else:
+        from .step_grid import scheduler
+    video, audio = scheduler(shift=video_shift), scheduler(shift=audio_shift)
     video.set_timesteps(steps, device=device)
     audio.set_timesteps(steps, device=device)
     return modality_timesteps(video.timesteps, audio.timesteps, task)

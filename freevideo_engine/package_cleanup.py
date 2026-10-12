@@ -26,7 +26,10 @@ import shutil
 import stat
 import uuid
 
-from .installation_cleanup import local_path
+from .installation_cleanup import local_path, root_path
+from .long_paths import io_path, resolved, plain
+from .runtime_alias import is_junction, checked_real_path, AliasUnavailable
+from .system import windows
 
 PACKAGES = '.freevideo-packages'
 STAGES = '.freevideo-downloads'
@@ -43,9 +46,17 @@ STAGE = re.compile(r'(?P<sha>[0-9a-f]{16})-[A-Za-z0-9_-]+(?:\.(?:restart-approve
 
 def unique_bytes(path):
     """Bytes that deleting path frees: regular files no other name links to."""
-    path, total = Path(path), 0
+    try:
+        path = io_path(checked_real_path(path))
+        if path.is_dir():
+            path = resolved(path)
+    except AliasUnavailable:
+        return 0
+    total = 0
     entries = [(path.parent, [], [path.name])] if path.is_file() else os.walk(path, followlinks=False)
-    for directory, _, files in entries:
+    for directory, folders, files in entries:
+        # os.walk(followlinks=False) still follows Windows directory junctions.
+        folders[:] = [name for name in folders if not is_junction(Path(directory) / name)]
         for name in files:
             try:
                 info = os.lstat(os.path.join(directory, name))
@@ -58,19 +69,30 @@ def unique_bytes(path):
 
 def runtime_root(engine):
     """The offline installation's root, when this engine belongs to one."""
-    root = Path(engine).parent
-    return root if (root / 'portable.json').is_file() else None
+    try:
+        root = resolved(checked_real_path(engine)).parent
+    except AliasUnavailable:
+        return None
+    return Path(plain(root)) if (root / 'portable.json').is_file() else None
 
 
 def verified_files(engine):
     """sha256 -> installed files recorded with that hash and unchanged since."""
-    engine, found = Path(engine), {}
+    found = {}
+    try:
+        engine = resolved(checked_real_path(engine))
+    except AliasUnavailable:
+        return found
 
     def add(path, record):
+        try:
+            path = checked_real_path(path)
+        except AliasUnavailable:
+            return
         if not isinstance(record, dict) or not isinstance(record.get('sha256'), str):
             return
         try:
-            info = os.stat(path)
+            info = os.stat(io_path(path))
         except OSError:
             return
         if not stat.S_ISREG(info.st_mode) or info.st_size != record.get('bytes'):
@@ -79,7 +101,7 @@ def verified_files(engine):
             return
         if record.get('inode') and info.st_ino != record['inode']:
             return
-        found.setdefault(record['sha256'], []).append(Path(path).absolute())
+        found.setdefault(record['sha256'], []).append(Path(plain(io_path(path).absolute())))
 
     ledger = engine / 'verified-models.json'
     rows = load(ledger)
@@ -90,20 +112,25 @@ def verified_files(engine):
         rows = load(engine / 'portable-verified.json')
         for path, record in (rows.items() if isinstance(rows, dict) else ()):
             if not Path(path).is_absolute() and '..' not in Path(path).parts:
-                add(root / path, record)
+                add(io_path(root) / path, record)
     return found
 
 
 def load(path):
     try:
-        return json.loads(Path(path).read_text(encoding='utf-8'))
+        path = checked_real_path(path)
+        return json.loads(io_path(path).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
 
 
 def installed_at(engine):
     """When the current installation was last set up; packages imported later may be waiting for it."""
-    engine, times = Path(engine), []
+    times = []
+    try:
+        engine = resolved(checked_real_path(engine))
+    except AliasUnavailable:
+        return None
     for path in (engine / 'machine.json', engine.parent / 'portable.json'):
         try:
             times.append(path.stat().st_mtime)
@@ -115,24 +142,32 @@ def installed_at(engine):
 def package_roots(engine, comfy_root=None):
     """Folders an import may have unpacked into: the destination beside the engine, the ComfyUI folder,
     and, for an offline installation, the destination holding its own package folder."""
-    engine = Path(engine).absolute()
+    try:
+        engine = checked_real_path(engine)
+        comfy_root = checked_real_path(comfy_root) if comfy_root else None
+    except AliasUnavailable:
+        return []
+    engine = resolved(engine)
+    comfy_root = resolved(comfy_root) if comfy_root else None
     roots = [engine.parent]
     if comfy_root:
-        roots += [Path(comfy_root).absolute(), Path(comfy_root).absolute().parent]
+        roots += [io_path(comfy_root).absolute(), io_path(comfy_root).absolute().parent]
     roots += [parent.parent for parent in engine.parents if parent.name == PACKAGES]
     found = []
     for root in roots:
         folder = root / PACKAGES
-        if folder.is_dir() and folder not in found:
-            found.append(folder)
+        ordinary = Path(plain(folder))
+        if (ordinary not in found and folder.is_dir()
+                and (not windows() or local_path(root, folder))):
+            found.append(ordinary)
     return found
 
 
 def inside(path, folder):
     try:
-        Path(path).absolute().relative_to(Path(folder).absolute())
+        io_path(checked_real_path(path)).absolute().relative_to(io_path(checked_real_path(folder)).absolute())
         return True
-    except ValueError:
+    except (OSError, ValueError):
         return False
 
 
@@ -142,7 +177,13 @@ def discard(path, root, running=None, dry_run=False):
     A dry run applies every check and reports what would be freed, deleting nothing.
     """
     from .version_cleanup import started_from, plain_tree
-    path, root = Path(path), Path(root)
+    try:
+        path, root = checked_real_path(path), checked_real_path(root)
+        if is_junction(path):
+            return None
+        root, path = root_path(root, path)
+    except AliasUnavailable:
+        return None
     if ('.replaced-' in path.name or not local_path(root, path) or started_from(path, running)
             or (path.is_dir() and not plain_tree(path))):
         return None
@@ -165,30 +206,48 @@ def discard(path, root, running=None, dry_run=False):
 
 
 def packages(folder):
-    for pack in sorted(Path(folder).iterdir()) if Path(folder).is_dir() else ():
-        if not pack.is_dir() or '.retired-' in pack.name:
+    try:
+        folder = checked_real_path(folder)
+    except AliasUnavailable:
+        return
+    if is_junction(folder):
+        return
+    for pack in sorted(io_path(folder).iterdir()) if io_path(folder).is_dir() else ():
+        if (not pack.is_dir() or '.retired-' in pack.name
+                or (windows() and not local_path(io_path(folder), pack))):
             continue
         inner = pack / INNER
+        if windows() and not local_path(pack, inner):
+            continue
         if (inner / RUNTIME_MARKER).is_file() or (inner / 'portable.json').is_file():
-            yield pack, 'runtime', None
+            yield Path(plain(pack)), 'runtime', None
         else:
             value = load(inner / MODELS_MARKER)
-            yield pack, 'models', value if isinstance(value, dict) else None
+            yield Path(plain(pack)), 'models', value if isinstance(value, dict) else None
 
 
 def prune_packages(engine, comfy_root=None, index=None, running=None, dry_run=False):
     """Model package extractions the installation no longer needs."""
     result = dict(released_bytes=0, removed=[], kept=[])
+    try:
+        engine = checked_real_path(engine)
+        if comfy_root:
+            comfy_root = checked_real_path(comfy_root)
+    except AliasUnavailable:
+        result['kept'].append(dict(kind='installation', reason='invalid runtime alias'))
+        return result
+    engine = resolved(engine)
     index = verified_files(engine) if index is None else index
     installed = installed_at(engine)
-    holders = [path for paths in index.values() for path in paths]
+    holders = [io_path(checked_real_path(path)) for paths in index.values() for path in paths]
     for folder in package_roots(engine, comfy_root):
         for pack, kind, value in packages(folder):
+            pack = io_path(pack)
             if kind == 'runtime' or inside(engine, pack):
-                result['kept'].append(dict(kind='offline-package', path=str(pack), reason='environment package'))
+                result['kept'].append(dict(kind='offline-package', path=plain(pack), reason='environment package'))
                 continue
             if any(inside(path, pack) for path in holders):
-                result['kept'].append(dict(kind='offline-package', path=str(pack), reason='installed files live here'))
+                result['kept'].append(dict(kind='offline-package', path=plain(pack), reason='installed files live here'))
                 continue
             rows = [row for row in (value or {}).get('files', [])
                     if isinstance(row, dict) and row.get('path') != PACK_INVENTORY
@@ -199,14 +258,14 @@ def prune_packages(engine, comfy_root=None, index=None, running=None, dry_run=Fa
             except OSError:
                 stale = installed is not None
             if not covered and not stale:
-                result['kept'].append(dict(kind='offline-package', path=str(pack), reason='imported after this installation'))
+                result['kept'].append(dict(kind='offline-package', path=plain(pack), reason='imported after this installation'))
                 continue
             freed = discard(pack, folder, running, dry_run)
             if freed is None:
-                result['kept'].append(dict(kind='offline-package', path=str(pack), reason='in use'))
+                result['kept'].append(dict(kind='offline-package', path=plain(pack), reason='in use'))
                 continue
             result['released_bytes'] += freed
-            result['removed'].append(dict(kind='offline-package', path=str(pack), bytes=freed,
+            result['removed'].append(dict(kind='offline-package', path=plain(pack), bytes=freed,
                                           reason='installed and verified' if covered else 'not used by this installation'))
     return result
 
@@ -214,18 +273,24 @@ def prune_packages(engine, comfy_root=None, index=None, running=None, dry_run=Fa
 def prune_downloads(engine, index=None, running=None, dry_run=False):
     """Staging folders and kept partial copies of model files that are installed and verified."""
     result = dict(released_bytes=0, removed=[], kept=[])
+    try:
+        engine = resolved(checked_real_path(engine))
+    except AliasUnavailable:
+        result['kept'].append(dict(kind='installation', reason='invalid runtime alias'))
+        return result
     index = verified_files(engine) if index is None else index
-    engine = Path(engine).absolute()
+    engine = io_path(checked_real_path(engine)).absolute()
     top = runtime_root(engine) or engine
     prefixes = {sha[:16] for sha in index}
     stages, siblings = set(), {}
     for sha, paths in index.items():
         for path in paths:
+            path = io_path(checked_real_path(path))
             siblings.setdefault(path.parent, set()).add(path.name)
             for parent in path.parents:
                 if not inside(parent, top):
                     break
-                if (parent / STAGES).is_dir():
+                if (parent / STAGES).is_dir() and (not windows() or local_path(top, parent / STAGES)):
                     stages.add(parent / STAGES)
     for folder in sorted(stages):
         for stage in sorted(folder.iterdir()):
@@ -234,11 +299,13 @@ def prune_downloads(engine, index=None, running=None, dry_run=False):
                 continue
             freed = discard(stage, folder, running, dry_run)
             if freed is None:
-                result['kept'].append(dict(kind='download-leftover', path=str(stage), reason='in use'))
+                result['kept'].append(dict(kind='download-leftover', path=plain(stage), reason='in use'))
             else:
                 result['released_bytes'] += freed
-                result['removed'].append(dict(kind='download-leftover', path=str(stage), bytes=freed))
+                result['removed'].append(dict(kind='download-leftover', path=plain(stage), bytes=freed))
     for directory, names in siblings.items():
+        if windows() and not local_path(top, directory):
+            continue
         try:
             entries = sorted(directory.iterdir())
         except OSError:
@@ -249,16 +316,20 @@ def prune_downloads(engine, index=None, running=None, dry_run=False):
                 continue
             freed = discard(entry, directory, running, dry_run)
             if freed is None:
-                result['kept'].append(dict(kind='download-leftover', path=str(entry), reason='in use'))
+                result['kept'].append(dict(kind='download-leftover', path=plain(entry), reason='in use'))
             else:
                 result['released_bytes'] += freed
-                result['removed'].append(dict(kind='download-leftover', path=str(entry), bytes=freed))
+                result['removed'].append(dict(kind='download-leftover', path=plain(entry), bytes=freed))
     return result
 
 
 def copied_models(engine):
     """Model files imported from a library the installation could not link to, as (bytes, files)."""
-    rows = load(Path(engine) / 'verified-models.json')
+    try:
+        engine = checked_real_path(engine)
+    except AliasUnavailable:
+        return 0, 0
+    rows = load(io_path(engine) / 'verified-models.json')
     copied = [record for record in (rows.values() if isinstance(rows, dict) else ())
               if isinstance(record, dict) and record.get('method') == 'verified_local_copy']
     return sum(int(record.get('bytes') or 0) for record in copied), len(copied)
@@ -266,14 +337,23 @@ def copied_models(engine):
 
 def copy_reason(engine):
     """Why imports were copied: 'exfat' when the installation's own disk cannot hold links, else 'other-disk'."""
+    engine = checked_real_path(engine)
     from .local_models import volume_filesystem
     filesystem = volume_filesystem(engine)
     return 'exfat' if filesystem and filesystem != 'NTFS' else 'other-disk'
 
 
 def run(engine, comfy_root=None, running=None, dry_run=False):
-    index = verified_files(engine)
     result = dict(released_bytes=0, removed=[], kept=[], dry_run=dry_run)
+    try:
+        engine = checked_real_path(engine)
+        comfy_root = checked_real_path(comfy_root) if comfy_root else None
+    except AliasUnavailable:
+        result['kept'].append(dict(kind='installation', reason='invalid runtime alias'))
+        result.update(copied_model_bytes=0, copied_model_files=0, copied_model_reason=None)
+        return result
+    engine = resolved(engine)
+    index = verified_files(engine)
     for part in (prune_packages(engine, comfy_root, index, running, dry_run),
                  prune_downloads(engine, index, running, dry_run)):
         result['released_bytes'] += part['released_bytes']
@@ -289,7 +369,7 @@ OPTIONAL_PREFIX = 'models/base/sampling-cache/'
 
 def archive_unchanged(record):
     try:
-        info = os.stat(record['path'])
+        info = os.stat(io_path(checked_real_path(record['path'])))
     except (OSError, KeyError, TypeError):
         return False
     return stat.S_ISREG(info.st_mode) and info.st_size == record.get('bytes') and info.st_mtime_ns == record.get('mtime_ns')
@@ -297,11 +377,14 @@ def archive_unchanged(record):
 
 def archive_rows(record):
     """The files a recorded ZIP provides: from its extraction, or else from the ZIP's own record."""
-    value = load(Path(record['root']) / MODELS_MARKER)
+    try:
+        value = load(io_path(checked_real_path(record['root'])) / MODELS_MARKER)
+    except AliasUnavailable:
+        return None
     if not isinstance(value, dict):
         try:
             from .offline_packages import inspect_archive
-            value = inspect_archive(record['path'])
+            value = inspect_archive(checked_real_path(record['path']))
         except Exception:  # A ZIP that cannot be read is never offered.
             return None
     return [row for row in value.get('files', []) if isinstance(row, dict) and row.get('path') != PACK_INVENTORY]
@@ -309,15 +392,24 @@ def archive_rows(record):
 
 def archives(records, engine, index=None):
     """The recorded ZIPs whose contents this installation holds, verified: dict(bytes, paths)."""
+    try:
+        engine = checked_real_path(engine)
+    except AliasUnavailable:
+        return dict(bytes=0, paths=[])
     index = verified_files(engine) if index is None else index
     runtime = runtime_root(engine)
+    runtime = io_path(runtime) if runtime is not None else None
     paths, total = [], 0
     for record in records:
+        try:
+            checked_real_path(record['root'])
+        except AliasUnavailable:
+            continue
         if not archive_unchanged(record):
             continue
         if record.get('kind') == 'runtime':
             # The environment package was unpacked into this very installation.
-            held = runtime is not None and Path(record['root']).resolve() == runtime.resolve()
+            held = runtime is not None and resolved(checked_real_path(record['root'])) == resolved(runtime)
         else:
             rows = archive_rows(record)
 
@@ -330,7 +422,7 @@ def archives(records, engine, index=None):
                         and placed.is_file() and placed.stat().st_size == row.get('bytes'))
             held = bool(rows) and all(installed(row) for row in rows)
         if held:
-            paths.append(record['path'])
+            paths.append(plain(checked_real_path(record['path'])))
             total += record['bytes']
     return dict(bytes=total, paths=paths)
 
@@ -341,8 +433,8 @@ def delete_archives(records, engine):
     freed, removed = 0, []
     for path in offer['paths']:
         try:
-            info = os.lstat(path)
-            os.unlink(path)
+            info = os.lstat(io_path(path))
+            os.unlink(io_path(path))
         except OSError:
             continue  # In use or read-only: kept, offered again next time.
         removed.append(path)

@@ -14,6 +14,7 @@ import time
 import traceback
 from urllib.parse import quote
 
+from . import execution_paths
 from .bootstrap import inventory, digest, GiB, PACKAGE, DEFAULT_ROOT, existing_parent
 from .geometry import geometry
 from .locking import runtime_lock, LOCK_ENV
@@ -361,7 +362,7 @@ def provenance(machine, env):
                           ('nvidia_smi', [nvidia_smi(), '-q']),
                           ('engine_packages', [machine['python'], '-m', 'pip', 'freeze']),
                           ('encoder_packages', [machine['comfy_python'], '-m', 'pip', 'freeze'])]:
-        p = subprocess.run(command, capture_output=True, text=True, env=env, timeout=30, encoding='utf-8', errors='replace')
+        p = execution_paths.run(command, capture_output=True, text=True, env=env, timeout=30, encoding='utf-8', errors='replace')
         result[name] = {'returncode': p.returncode, 'stdout': p.stdout, 'stderr': p.stderr}
     return result
 

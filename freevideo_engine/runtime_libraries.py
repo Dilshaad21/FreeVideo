@@ -19,6 +19,8 @@ from pathlib import Path
 import re
 import shlex
 
+from .long_paths import io_path, plain, resolved
+
 # ComfyUI messages choose between this and the page's own setup (repair_hint).
 from .comfy_launcher_api import LAUNCHER_REPAIR as REINSTALL
 
@@ -46,11 +48,11 @@ def mismatch(error):
 
 def site_packages(environment):
     """The site-packages folder of a virtual environment, Windows or POSIX."""
-    environment = Path(environment)
+    environment = io_path(environment)
     if (environment / 'Lib' / 'site-packages').is_dir():
-        return environment / 'Lib' / 'site-packages'
+        return Path(plain(environment / 'Lib' / 'site-packages'))
     found = sorted(environment.glob('lib/python*/site-packages'))
-    return found[-1] if found else None
+    return Path(plain(found[-1])) if found else None
 
 
 def _digest(path, algorithm):
@@ -63,8 +65,8 @@ def _digest(path, algorithm):
 
 def _canonical(path):
     """One spelling per file for comparisons: links resolved, case folded on Windows."""
-    text = os.path.realpath(str(path))
-    return os.path.normcase(text[4:] if text.startswith('\\\\?\\') else text)
+    text = os.path.realpath(io_path(path))
+    return os.path.normcase(plain(text))
 
 
 def check(site):
@@ -189,10 +191,10 @@ def summary(result, repair=REINSTALL):
 def site_for(python):
     """site-packages of the environment a Python executable runs: a virtual
     environment (Scripts/ or bin/ beside it) or an embedded Windows Python."""
-    python = Path(python)
+    python = io_path(python)
     for candidate in (python.parent / 'Lib' / 'site-packages', python.parent.parent / 'Lib' / 'site-packages'):
         if candidate.is_dir():
-            return candidate
+            return Path(plain(candidate))
     return site_packages(python.parent.parent)
 
 
@@ -204,7 +206,7 @@ def _requirement_rows(requirements):
     pending, seen, rows = [Path(requirements)], set(), []
     while pending:
         try:
-            path = pending.pop().resolve()
+            path = resolved(pending.pop())
             if path in seen:
                 continue
             seen.add(path)
@@ -324,6 +326,7 @@ def incomplete(python):
         site = site_for(python)
         if site is None:
             return []
+        site = io_path(site)
         parent = Path(python).parent
         root = _canonical(parent.parent if parent.name.lower() in ('bin', 'scripts') else parent)
         found = set()
@@ -342,7 +345,7 @@ def incomplete(python):
                 if not path.startswith(root + os.sep):
                     continue
                 try:
-                    size = os.path.getsize(path)
+                    size = os.path.getsize(io_path(path))
                 except (FileNotFoundError, NotADirectoryError):
                     size = None
                 except OSError:

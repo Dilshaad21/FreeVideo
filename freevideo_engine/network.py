@@ -15,11 +15,13 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+from . import execution_paths
 from .windows_ux import external_python, hidden_console
 import threading
 import time
 from urllib.parse import quote, unquote, urlencode, urljoin, urlsplit
 from . import proxy
+from .long_paths import io_path, plain_errors
 from .system import curl_executable, missing_curl_message, windows
 
 
@@ -64,9 +66,10 @@ def source_url(family, name, env=None):
     return SOURCES[family][name]
 
 
+@plain_errors
 def model_spec(spec=None):
     return (spec if spec is not None else
-            json.loads(Path(__file__).with_name('dependencies.json').read_text(encoding='utf-8')))['models']
+            json.loads(io_path(Path(__file__).with_name('dependencies.json')).read_text(encoding='utf-8')))['models']
 
 
 def modelscope_mapping(row, spec=None):
@@ -137,7 +140,7 @@ def curl_process(command, **kwargs):
     # otherwise healthy external curl binaries (including Git's copy).
     try:
         with external_python():
-            return subprocess.Popen(command, **kwargs, **hidden_console())
+            return execution_paths.popen(command, **kwargs, **hidden_console())
     except OSError as error:
         if not windows():
             raise
@@ -293,7 +296,7 @@ def probe(family, name, spec, versions, timeout, env, *, measure_speed=False):
             # select its existing SSH URL instead of the HTTPS URL being tested.
             # A private temporary name avoids that; carry origin's proxy policy
             # so the probe still matches the subsequent dependency fetch.
-            origin_proxy = subprocess.run(['git', 'config', '--get', 'remote.origin.proxy'], env=env,
+            origin_proxy = execution_paths.run(['git', 'config', '--get', 'remote.origin.proxy'], env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3, **hidden_console())
             if origin_proxy.returncode == 0:
                 settings['remote.' + remote + '.proxy'] = origin_proxy.stdout.decode().rstrip('\r\n')
@@ -883,7 +886,7 @@ MIN_GIT = (2, 17)
 def git_version(executable, env=None):
     """(major, minor) of a Git executable, or None when it cannot be run or read."""
     try:
-        output = subprocess.run([str(executable), '--version'], env=env, stdout=subprocess.PIPE,
+        output = execution_paths.run([str(executable), '--version'], env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, timeout=30, **hidden_console()).stdout
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
@@ -915,14 +918,14 @@ def clone(target, url, commit, *, sparse=None, run=None, network=None, env=None)
         command = [git, *command[1:]]
         if run:
             return run(label, command, env=env)
-        result = subprocess.run(list(map(str, command)), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **hidden_console())
+        result = execution_paths.run(list(map(str, command)), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **hidden_console())
         if result.returncode:
             raise RuntimeError(result.stdout[-2500:])
     if target.exists():
         if not (target / '.git').exists():
             raise ValueError('Existing dependency is not a Git checkout of the pinned source: ' + str(target))
-        head = subprocess.check_output([git, '-C', str(target), 'rev-parse', 'HEAD'], env=env, text=True, **hidden_console()).strip()
-        dirty = subprocess.check_output([git, '-C', str(target), 'status', '--porcelain', '--untracked-files=no'], env=env, text=True, **hidden_console())
+        head = execution_paths.check_output([git, '-C', str(target), 'rev-parse', 'HEAD'], env=env, text=True, **hidden_console()).strip()
+        dirty = execution_paths.check_output([git, '-C', str(target), 'status', '--porcelain', '--untracked-files=no'], env=env, text=True, **hidden_console())
         if head != commit or dirty:
             raise ValueError('Existing dependency differs from the pinned clean source: ' + str(target))
         return target
@@ -958,7 +961,7 @@ def clone(target, url, commit, *, sparse=None, run=None, network=None, env=None)
             finally:
                 env = original
             execute(target.name + '-checkout', ['git', '-C', temporary, 'checkout', '--detach', commit])
-            actual = subprocess.check_output([git, '-C', str(temporary), 'rev-parse', 'HEAD'], env=env, text=True, **hidden_console()).strip()
+            actual = execution_paths.check_output([git, '-C', str(temporary), 'rev-parse', 'HEAD'], env=env, text=True, **hidden_console()).strip()
             if actual != commit:
                 raise ValueError('Downloaded source did not match its pinned commit')
             temporary.rename(target)

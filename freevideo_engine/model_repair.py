@@ -11,6 +11,7 @@ import uuid
 
 from .disk_space import size_text
 from .monitoring import save
+from .long_paths import io_path, plain
 
 
 # Shared copy for setup, the launcher and the browser plan.
@@ -59,7 +60,7 @@ CHANGED_WHY = dict(
            'continuing with it.', '确认计划之后，安装位置里的文件又有变化，FreeVideo 因此停止，未按原计划继续。'),
     other=('Something changed after you confirmed the plan (for example the settings, the GPU or the free disk '
            'space), so FreeVideo stopped instead of continuing with it.',
-           '确认计划之后，这台电脑的情况又有变化（例如设置、显卡或可用磁盘空间），FreeVideo 因此停止，未按原计划继续。'),
+           '确认计划之后，设置、显卡或可用磁盘空间发生了变化，FreeVideo 因此停止，未按原计划继续。'),
 )
 CHANGED_REPAIR = ('Click Repair again to review the new plan.', '请再次点击“修复”，查看新的计划。')
 CHANGED_WAYS = dict(
@@ -82,7 +83,7 @@ def identity(path):
         return None
     if stat.S_ISREG(info.st_mode):
         return dict(bytes=info.st_size, mtime_ns=info.st_mtime_ns, st_dev=info.st_dev, st_ino=info.st_ino,
-                    parent_realpath=os.path.realpath(path.parent))
+                    parent_realpath=plain(os.path.realpath(io_path(path.parent))))
     return None
 
 

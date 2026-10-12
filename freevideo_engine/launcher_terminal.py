@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from .terminal_ui import ESCAPES
+from .long_paths import io_path, plain_text
 
 
 class Tail:
@@ -39,7 +40,7 @@ class Tail:
         self.discard_line = False
         if self.path is not None:
             try:
-                info = self.path.stat()
+                info = io_path(self.path).stat()
                 self.identity = (info.st_dev, info.st_ino)
                 self.offset = info.st_size
             except OSError:
@@ -49,7 +50,7 @@ class Tail:
         if self.path is None:
             return ''
         try:
-            with self.path.open('rb') as stream:
+            with io_path(self.path).open('rb') as stream:
                 import os
                 info = os.fstat(stream.fileno())
                 identity = (info.st_dev, info.st_ino)
@@ -86,7 +87,7 @@ class Tail:
                 line = ' · '.join(str(event[k]) for k in ('label', 'detail') if event.get(k))
             line = ESCAPES.sub('', line)
             line = ''.join(c for c in line if c.isprintable() or c == '\t')
-            output.append(self.redactor.text(line))
+            output.append(self.redactor.text(plain_text(line)))
         if len(self.pending) > self.READ_BYTES:
             self.pending = ''
             self.discard_line = True

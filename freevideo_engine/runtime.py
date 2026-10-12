@@ -280,7 +280,16 @@ class Engine:
         self.resident_weight_bytes = 0
         block_bind_seconds = 0.
         upload_submit_seconds = 0.
-        for index, block in enumerate(model.transformer_blocks):
+        block_order = list(range(len(model.transformer_blocks)))
+        if streamed_source is not None and streamed_source.direct_read:
+            # Pins and views are granted in the order blocks are prepared, and
+            # the blocks RAM cannot keep are read from the drive every step.
+            # Prepared in index order those were the last blocks of the model.
+            from .streamed_weights import spread_layer_order
+            block_order[resident_blocks:] = [resident_blocks + index for index in
+                                             spread_layer_order(len(block_order) - resident_blocks)]
+        for prepared, index in enumerate(block_order, 1):
+            block = model.transformer_blocks[index]
             prefix = f'transformer_blocks.{index}.'
             adaln_started = time.perf_counter()
             table = table_cache.load(index, steps) if table_cache is not None else None
@@ -343,10 +352,10 @@ class Engine:
             # A block whose sampling table is computed here, for a step count
             # without stored tables, takes far longer than a cached one; report
             # each of those so the load visibly moves.
-            if (index + 1) % 5 == 0 or (adaln_cache and not cache_hit):
-                print(json.dumps({'event': 'prepared_blocks', 'blocks': index + 1,
+            if prepared % 5 == 0 or (adaln_cache and not cache_hit):
+                print(json.dumps({'event': 'prepared_blocks', 'blocks': prepared,
                                   'adaln_cache': adaln_cache, 'adaln_reused_blocks': table_cache_hits,
-                                  'resident_uploaded_blocks': min(index + 1, resident_blocks),
+                                  'resident_uploaded_blocks': min(prepared, resident_blocks),
                                   'phase': 'Load cached blocks and upload resident weights',
                                   'seconds': time.perf_counter() - started}), flush=True)
         if adaln_cache:

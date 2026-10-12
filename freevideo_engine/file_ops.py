@@ -2,13 +2,14 @@
 from pathlib import Path
 import time
 from .system import windows
+from .long_paths import io_path, plain
 
 
 def publish(source, destination):
-    source, destination = Path(source), Path(destination)
+    source, destination = io_path(source), io_path(destination)
     for attempt in range(8):
         if destination.exists() or destination.is_symlink():
-            raise FileExistsError('Destination already exists; both files retained: ' + str(destination))
+            raise FileExistsError('Destination already exists; both files retained: ' + plain(destination))
         try:
             source.rename(destination)
             return

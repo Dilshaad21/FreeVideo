@@ -31,8 +31,10 @@ import re
 import stat
 import time
 
+from .long_paths import io_path, plain, plain_errors
 from .locking import runtime_lock
 from .storage import fingerprint
+from .runtime_alias import checked_real_path, AliasUnavailable
 
 SIDECAR = '.partial.source.json'
 SIDECAR_LIMIT = 4096
@@ -50,8 +52,10 @@ def redirected(info):
     return stat.S_ISLNK(info.st_mode) or bool(getattr(info, 'st_file_attributes', 0) & REPARSE_POINT)
 
 
+@plain_errors
 def inside(base, path):
     """True when path is base or below it and nothing between them is a link or junction."""
+    base, path = io_path(base), io_path(path)
     try:
         path.relative_to(base)
         current = path
@@ -65,7 +69,9 @@ def inside(base, path):
         return False
 
 
+@plain_errors
 def unshared_file(path):
+    path = io_path(path)
     if '.replaced-' in path.name:
         return None
     try:
@@ -82,25 +88,29 @@ def variant_folder(root, catalog, name):
     return root / 'prepared' / ('edge-' + variant.get('revision', catalog['revision'])[:16])
 
 
+@plain_errors
 def active_variant(root, catalog):
     """The catalog variant whose cache machine.json names, or None when that is unknown."""
+    root = io_path(root)
     try:
         record = json.loads((root / 'machine.json').read_text(encoding='utf-8'))
-        cache = Path(record['cache'])
+        cache = io_path(record['cache'])
     except (OSError, ValueError, KeyError, TypeError):
         return None, None
     for name, variant in catalog['variants'].items():
         expected = variant_folder(root, catalog, name) / variant['cache_prefix']
         try:
             if cache.absolute() == expected or cache.resolve() == expected.resolve():
-                return name, expected
+                return name, Path(plain(expected))
         except OSError:
             continue
-    return None, cache
+    return None, Path(plain(cache))
 
 
+@plain_errors
 def complete(root, catalog, name):
     """Every catalog file of the variant is present, regular, local and of its catalogued size."""
+    root = io_path(root)
     folder = variant_folder(root, catalog, name)
     prepared = root / 'prepared'
     for row in catalog['variants'][name]['files']:
@@ -114,7 +124,9 @@ def complete(root, catalog, name):
     return True
 
 
+@plain_errors
 def _sidecar_matches(path, row):
+    path = io_path(path)
     info = unshared_file(path)
     if info is None or info.st_size > SIDECAR_LIMIT:
         return False
@@ -125,8 +137,10 @@ def _sidecar_matches(path, row):
     return isinstance(value, dict) and value.get('expected') == row['sha256']
 
 
+@plain_errors
 def _stage(folder, prepared, stage):
     """Files and directories of one native staging folder, or None when anything is redirected or shared."""
+    prepared, stage = io_path(prepared), io_path(stage)
     if not inside(prepared, stage) or not stage.is_dir():
         return None
     files, directories = [], [stage]
@@ -144,12 +158,14 @@ def _stage(folder, prepared, stage):
             if unshared_file(path) is None:
                 return None
             files.append(path)
-    return files, directories
+    return [Path(plain(path)) for path in files], [Path(plain(path)) for path in directories]
 
 
+@plain_errors
 def _generated_tables(prepared, table):
     """Files of one engine-generated AdaLN table folder, or None unless it is bound to its identity."""
     from .adaln_assets import FORMAT, directory
+    prepared, table = io_path(prepared), io_path(table)
     if not ADALN_DIRECTORY.fullmatch(table.name) or not inside(prepared, table) or not table.is_dir():
         return None
     entries = list(table.iterdir())
@@ -165,20 +181,24 @@ def _generated_tables(prepared, table):
             return None
     except (OSError, ValueError, TypeError):
         return None
-    return entries
+    return [Path(plain(path)) for path in entries]
 
 
+@plain_errors
 def _plan_file(path, kind, entries):
-    entries.append(dict(path=str(path), kind=kind, bytes=path.lstat().st_size, stamp=fingerprint(path)))
+    path = io_path(path)
+    entries.append(dict(path=plain(path), kind=kind, bytes=path.lstat().st_size, stamp=fingerprint(path)))
 
 
+@plain_errors
 def retire(root, catalog, name):
     """Owned files of one retired variant, and what stays in its folder."""
+    root = io_path(root)
     folder = variant_folder(root, catalog, name)
     prepared = root / 'prepared'
     entries, kept, planned, stage_directories = [], [], set(), []
     if not folder.is_dir() or not inside(prepared, folder):
-        return dict(variant=name, folder=str(folder), files=entries, kept=kept, bytes=0, kept_bytes=0,
+        return dict(variant=name, folder=plain(folder), files=entries, kept=kept, bytes=0, kept_bytes=0,
                     stage_directories=stage_directories, present=folder.exists() or folder.is_symlink())
     stages = folder / STAGES
     for row in catalog['variants'][name]['files']:
@@ -208,17 +228,19 @@ def retire(root, catalog, name):
                 if found is None:
                     continue
                 for path_in_stage in found[0]:
+                    path_in_stage = io_path(path_in_stage)
                     if path_in_stage not in planned:
                         _plan_file(path_in_stage, 'stage', entries)
                         planned.add(path_in_stage)
                 for directory in found[1]:
-                    if str(directory) not in stage_directories:
-                        stage_directories.append(str(directory))
+                    if plain(directory) not in stage_directories:
+                        stage_directories.append(plain(directory))
     cache = folder / catalog['variants'][name]['cache_prefix']
     if cache.is_dir() and inside(prepared, cache):
         for table in sorted(cache.iterdir()):
             found = _generated_tables(prepared, table)
             for path in found or ():
+                path = io_path(path)
                 if path not in planned:
                     _plan_file(path, 'adaln', entries)
                     planned.add(path)
@@ -229,7 +251,7 @@ def retire(root, catalog, name):
             try:
                 if redirected(path.lstat()):
                     names.remove(name_)
-                    kept.append(dict(path=str(path), bytes=0, reason='link or junction'))
+                    kept.append(dict(path=plain(path), bytes=0, reason='link or junction'))
             except OSError:
                 names.remove(name_)
         for name_ in files:
@@ -241,32 +263,40 @@ def retire(root, catalog, name):
             except OSError:
                 size = 0
             kept_bytes += size
-            kept.append(dict(path=str(path), bytes=size, reason='not placed by this installer for this variant'))
-    return dict(variant=name, folder=str(folder), files=entries, kept=kept, present=True,
+            kept.append(dict(path=plain(path), bytes=size, reason='not placed by this installer for this variant'))
+    return dict(variant=name, folder=plain(folder), files=entries, kept=kept, present=True,
                 stage_directories=stage_directories,
                 bytes=sum(row['bytes'] for row in entries), kept_bytes=kept_bytes)
 
 
+@plain_errors
 def fused_lora_variants(root, catalog, name):
     """Fused LoRA variants built from this variant (they live beside its cache)."""
-    beside = (variant_folder(root, catalog, name) / catalog['variants'][name]['cache_prefix']).parent
+    beside = (variant_folder(io_path(root), catalog, name) / catalog['variants'][name]['cache_prefix']).parent
     try:
-        return sorted(str(path) for path in beside.iterdir() if path.name.startswith(FUSED_LORA))
+        return sorted(plain(path) for path in beside.iterdir() if path.name.startswith(FUSED_LORA))
     except OSError:
         return []
 
 
+@plain_errors
 def scan(root, catalog=None, expect_active=None):
     """What removing the variants that are not in use would release; nothing is changed.
 
     expect_active names the variant the caller has just switched to; a scan
     that finds any other variant in use plans nothing.
     """
+    try:
+        root = checked_real_path(root)
+    except AliasUnavailable:
+        return dict(root=plain(root), active=None, cache=None, expect_active=expect_active,
+                    retired=[], kept_variants=[], bytes=0, kept_bytes=0,
+                    blockers=['invalid runtime alias'])
     from .prepared_model import catalog as load_catalog
-    root = Path(root).absolute()
+    root = io_path(Path(root).absolute())
     catalog = catalog or load_catalog()
     active, cache = active_variant(root, catalog)
-    plan = dict(root=str(root), active=active, cache=str(cache) if cache else None, expect_active=expect_active,
+    plan = dict(root=plain(root), active=active, cache=plain(cache) if cache else None, expect_active=expect_active,
                 retired=[], kept_variants=[], bytes=0, kept_bytes=0, blockers=[])
     try:
         if redirected((root / 'prepared').lstat()):
@@ -296,7 +326,7 @@ def scan(root, catalog=None, expect_active=None):
             continue
         fused = fused_lora_variants(root, catalog, name)
         if fused:
-            plan['kept_variants'].append(dict(variant=name, folder=str(folder), reason='fused-lora-variants',
+            plan['kept_variants'].append(dict(variant=name, folder=plain(folder), reason='fused-lora-variants',
                                               lora_variants=fused))
             continue
         retired = retire(root, catalog, name)
@@ -363,11 +393,30 @@ def stage_directory_permitted(directory, folder, rows):
             and any(kind == 'catalog' and row['sha256'][:16] == identity for kind, row in rows.values()))
 
 
+@plain_errors
 def clean(plan, catalog=None, receipt=None):
     """Remove exactly the planned files that are still unchanged; report everything else."""
+    # Authenticate every saved path before resolving, enumerating, or taking leases.
+    # Copy the plan so refusal leaves the caller's plan unchanged as well.
+    def checked(value):
+        return plain(checked_real_path(value))
+    plan = dict(plan, root=checked(plan['root']))
+    if plan.get('cache') is not None:
+        plan['cache'] = checked(plan['cache'])
+    retired = []
+    for row in plan['retired']:
+        retired.append(dict(row, folder=checked(row['folder']),
+                            files=[dict(entry, path=checked(entry['path'])) for entry in row['files']],
+                            kept=[dict(entry, path=checked(entry['path'])) for entry in row.get('kept', [])],
+                            stage_directories=[checked(value) for value in row.get('stage_directories', [])]))
+    plan['retired'] = retired
+    plan['kept_variants'] = [dict(row, folder=checked(row['folder']),
+                                lora_variants=[checked(value) for value in row.get('lora_variants', [])])
+                             for row in plan.get('kept_variants', [])]
+    receipt = checked_real_path(receipt) if receipt is not None else None
     from .prepared_model import catalog as load_catalog
     catalog = catalog or load_catalog()
-    root = Path(plan['root'])
+    root = io_path(plan['root'])
     removed, skipped, released = [], [], 0
     if plan.get('blockers'):
         raise ValueError('Retired model cleanup is blocked: ' + ', '.join(plan['blockers']))
@@ -383,14 +432,15 @@ def clean(plan, catalog=None, receipt=None):
             name = retired['variant']
             if name == active or name not in catalog['variants']:
                 raise ValueError('Retired model plan names the model in use; nothing was removed.')
-            folder, rows = allowed(root, catalog, name)
-            if str(folder) != retired['folder'] or folder == variant_folder(root, catalog, active):
+            folder, rows = allowed(Path(plain(root)), catalog, name)
+            folder = io_path(folder)
+            if plain(folder) != plain(retired['folder']) or folder == variant_folder(root, catalog, active):
                 raise ValueError('Retired model folder changed; check storage again.')
             directories = set()
             for entry in retired['files']:
                 path = Path(entry['path'])
                 reason = None
-                if not permitted(path, entry['kind'], folder, rows, catalog['variants'][name]['cache_prefix']):
+                if not permitted(path, entry['kind'], Path(plain(folder)), rows, catalog['variants'][name]['cache_prefix']):
                     reason = 'not a planned name'
                 elif not inside(prepared, path) or unshared_file(path) is None:
                     reason = 'link, junction, shared or missing'
@@ -401,16 +451,16 @@ def clean(plan, catalog=None, receipt=None):
                     except OSError:
                         reason = 'missing'
                 if reason:
-                    skipped.append(dict(path=str(path), reason=reason))
+                    skipped.append(dict(path=plain(path), reason=reason))
                     continue
                 try:
-                    path.unlink()
+                    io_path(path).unlink()
                 except OSError as error:
-                    skipped.append(dict(path=str(path), reason=type(error).__name__))
+                    skipped.append(dict(path=plain(path), reason=type(error).__name__))
                     continue
-                removed.append(dict(path=str(path), bytes=entry['bytes'], kind=entry['kind']))
+                removed.append(dict(path=plain(path), bytes=entry['bytes'], kind=entry['kind']))
                 released += entry['bytes']
-                current = path.parent
+                current = io_path(path).parent
                 while current != folder and folder in current.parents:
                     directories.add(current)
                     current = current.parent
@@ -418,9 +468,10 @@ def clean(plan, catalog=None, receipt=None):
             # them only when empty, deepest first, each named under its stage.
             for value in sorted(retired.get('stage_directories', []), key=lambda p: len(Path(p).parts), reverse=True):
                 directory = Path(value)
-                if not stage_directory_permitted(directory, folder, rows):
+                if not stage_directory_permitted(directory, Path(plain(folder)), rows):
                     continue
                 try:
+                    directory = io_path(directory)
                     if inside(prepared, directory) and directory.is_dir() and not any(directory.iterdir()):
                         directory.rmdir()
                 except OSError:
@@ -428,6 +479,7 @@ def clean(plan, catalog=None, receipt=None):
             # Only directories that held removed files, deepest first, and only when empty.
             for directory in sorted(directories, key=lambda p: len(p.parts), reverse=True) + [folder / STAGES, folder]:
                 try:
+                    directory = io_path(directory)
                     if inside(prepared, directory) and directory.is_dir() and not any(directory.iterdir()):
                         directory.rmdir()
                 except OSError:
@@ -435,7 +487,7 @@ def clean(plan, catalog=None, receipt=None):
     result = dict(released_bytes=released, removed_files=len(removed), skipped=skipped,
                   kept_bytes=plan.get('kept_bytes', 0), active=plan['active'])
     if receipt is not None:
-        receipt = Path(receipt)
+        receipt = io_path(receipt)
         receipt.parent.mkdir(parents=True, exist_ok=True)
         receipt.write_text(json.dumps(dict(result, removed=removed, finished=time.time()), indent=1), encoding='utf-8')
     return result

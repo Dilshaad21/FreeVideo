@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 
 from . import network
+from .long_paths import io_path, plain_errors
 
 
+@plain_errors
 def catalog():
-    return json.loads(Path(__file__).with_name('torch_downloads.json').read_text(encoding='utf-8'))['windows_cp312']
+    return json.loads(io_path(Path(__file__).with_name('torch_downloads.json')).read_text(encoding='utf-8'))['windows_cp312']
 
 
 def select(pins, cuda):

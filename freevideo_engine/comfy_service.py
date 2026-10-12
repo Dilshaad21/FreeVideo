@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 
+from . import execution_paths
 from .monitoring import save
 from . import engine_binding
 
@@ -124,7 +125,7 @@ def install(root, source, machine, port, out=say):
         env = dict(os.environ, FREEVIDEO_HOME=str(root), PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
         for name in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'FREEVIDEO_UI_EVENTS'):
             env.pop(name, None)
-        if subprocess.run(command, cwd=str(root), env=env, stdin=subprocess.DEVNULL).returncode:
+        if execution_paths.run(command, cwd=str(root), env=env, stdin=subprocess.DEVNULL).returncode:
             raise RuntimeError('ComfyUI could not be installed. Run the same command again to continue; '
                                'downloaded files are kept.')
         python = managed_python(Path(root), comfy)
@@ -385,7 +386,7 @@ def spawn(root, *, port, listen='127.0.0.1', tls=None):
     with (folder(root) / 'service.log').open('ab') as output:
         output.write(('\n[%s] freevideo service starting\n' % time.strftime('%Y-%m-%d %H:%M:%S')).encode())
         output.flush()
-        return subprocess.Popen(command, cwd=str(root), env=env, stdin=subprocess.DEVNULL, stdout=output,
+        return execution_paths.popen(command, cwd=str(root), env=env, stdin=subprocess.DEVNULL, stdout=output,
                                 stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
 
 

@@ -6,6 +6,7 @@ import sys
 import time
 
 from .monitoring import save
+from .long_paths import io_path, plain_data
 
 TEXT = ('comfy', 'destination', 'engine', 'models', 'python', 'url', 'language', 'offline_runtime')
 SELECTION = ('root', 'engine', 'source', 'python', 'url')
@@ -26,7 +27,7 @@ def default_language():
 
 
 def sanitize(value):
-    value = value if isinstance(value, dict) else {}
+    value = plain_data(value) if isinstance(value, dict) else {}
     result = {k: value[k] for k in TEXT if isinstance(value.get(k), str)}
     for key in ('separate', 'new_comfy', 'sampling_caches'):
         if type(value.get(key)) is bool:
@@ -61,7 +62,7 @@ def sanitize(value):
 
 def read(path):
     try:
-        return sanitize(json.loads(Path(path).read_text(encoding='utf-8')))
+        return sanitize(json.loads(io_path(path).read_text(encoding='utf-8')))
     except (OSError, ValueError):
         return {}
 

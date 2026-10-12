@@ -20,17 +20,74 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
+from . import execution_paths
 from .comfy_bridge import installation
-from . import disk_space
+from . import disk_space, launch_view
 from .comfy_environment import isolated_environment
 from .comfy_setup import Setup, SetupRunner
 from .comfy_source import RECEIPT, SOURCE_DISK_BYTES, new_layout, validate_target
 from .desktop_runtime import materialize_source, source_release
 from .monitoring import save
+from .long_paths import io_path, resolved, plain, plain_text, plain_error, plain_errors
 from . import engine_binding, processes
 
 PROTOCOL = 1
 TEMPLATE = 'FreeVideo-All-in-One.json'
+# Best-effort cancellation must not hold application shutdown hostage. The
+# daemon's join is a wall-clock bound even if a server trickles HTTP bytes.
+SHUTDOWN_CANCEL_SECONDS = 3.
+SHUTDOWN_REQUEST_SECONDS = .5
+SHUTDOWN_POLL_SECONDS = .1
+
+
+def cancel_running_generation(url):
+    """Use the page's request-local cancel route, then wait until those requests end.
+
+    The bridge writes its existing durable cancellation receipt before stopping
+    the CLI, so a request has its receipt once it leaves the running queue. No
+    receipt is invented here when ComfyUI cannot answer. Requests still waiting
+    in the queue never launched a worker; stopping the server discards them.
+    """
+    deadline = time.monotonic() + SHUTDOWN_CANCEL_SECONDS
+    stopped = threading.Event()
+
+    def timeout():
+        remaining = deadline - time.monotonic()
+        if stopped.is_set() or remaining <= 0:
+            raise TimeoutError('Shutdown cancellation deadline')
+        return min(SHUTDOWN_REQUEST_SECONDS, remaining)
+
+    def cancel_and_wait():
+        try:
+            requested = set()
+            while True:
+                queue = get_json(url + '/queue', timeout=timeout())
+                running = queue['queue_running']
+                targets = [(row[1], str(node)) for row in running
+                           for node, value in row[2].items()
+                           if value.get('class_type') == 'FreeVideoGenerate']
+                fresh = [target for target in targets if target not in requested]
+                # Done once nothing new is generating and every cancelled request has
+                # ended. An idle queue (or another node type) needs no wait at all.
+                if not fresh and not any(target in requested for target in targets):
+                    return
+                for prompt_id, node_id in fresh:
+                    request = Request(url + '/freevideo/cancel',
+                        data=json.dumps(dict(prompt_id=prompt_id, node_id=node_id)).encode(),
+                        headers={'Content-Type': 'application/json'}, method='POST')
+                    with build_opener(ProxyHandler({})).open(request, timeout=timeout()) as reply:
+                        reply.read(4096)
+                    requested.add((prompt_id, node_id))
+                stopped.wait(min(SHUTDOWN_POLL_SECONDS, timeout()))
+        except Exception:
+            # Missing route, malformed queue, timeout and HTTP errors all fall
+            # back to the same process-tree stop. Shutdown never depends on it.
+            return
+
+    worker = threading.Thread(target=cancel_and_wait, name='FreeVideo shutdown cancellation', daemon=True)
+    worker.start()
+    worker.join(max(0., deadline - time.monotonic()))
+    stopped.set()
 
 
 class OlderLauncher(ValueError):
@@ -41,12 +98,13 @@ class OlderLauncher(ValueError):
                          f'({installed_label}); nothing was changed.')
 
 
+@plain_errors
 def check_source_release(source, installed):
     """Reject only a provably older source, before any installation writes."""
     from .release_notes import label, older
     if not isinstance(installed, (str, Path)) or not installed:
         return
-    source, installed = Path(source).resolve(), Path(installed).resolve()
+    source, installed = resolved(source), resolved(installed)
     if not installed.is_dir() or source == installed:
         return
     candidate, current = source_release(source), source_release(installed)
@@ -54,9 +112,10 @@ def check_source_release(source, installed):
         raise OlderLauncher(label(candidate), label(current))
 
 
+@plain_errors
 def check_installed_sources(source, root, engine):
     """Either the node receipt or machine record can identify the installed code."""
-    for receipt in (node_target(root) / 'freevideo-launcher.json', Path(engine) / 'machine.json'):
+    for receipt in (io_path(node_target(root)) / 'freevideo-launcher.json', io_path(engine) / 'machine.json'):
         try:
             value = json.loads(receipt.read_text(encoding='utf-8'))
         except (OSError, ValueError):
@@ -65,10 +124,11 @@ def check_installed_sources(source, root, engine):
             check_source_release(source, value.get('source'))
 
 
+@plain_errors
 def disk_review(plan, engine, comfy, *, separate, new_comfy):
     """Add frontend costs to the right volume, including cross-drive installs."""
     frontend = plan.get('frontend')
-    if frontend and frontend['root'] == str(Path(comfy).resolve()) and frontend['separate'] == separate:
+    if frontend and frontend['root'] == plain(resolved(comfy)) and frontend['separate'] == separate:
         from .install_disk import errors
         disks = [dict(disk, paths=list(disk['paths']), free_bytes=disk_space.free_bytes(disk['paths'][0]))
                  for disk in plan.get('disks', [])]
@@ -83,7 +143,7 @@ def disk_review(plan, engine, comfy, *, separate, new_comfy):
         if not amount:
             continue
         parent = disk_space.existing(path)
-        disk = disks.setdefault(disk_space.disk_key(parent), dict(paths=[str(parent)], needed_bytes=0))
+        disk = disks.setdefault(disk_space.disk_key(parent), dict(paths=[plain(parent)], needed_bytes=0))
         disk['free_bytes'] = disk_space.free_bytes(parent)
         disk['needed_bytes'] += amount
         extra += amount
@@ -92,57 +152,63 @@ def disk_review(plan, engine, comfy, *, separate, new_comfy):
 
 
 def layout(path):
-    selected = Path(path).expanduser().resolve()
-    root = selected / 'ComfyUI' if (selected / 'ComfyUI' / 'main.py').is_file() else selected
-    if not (root / 'main.py').is_file() or not (root / 'folder_paths.py').is_file():
-        raise ValueError('Select the ComfyUI folder, or the portable folder containing ComfyUI.')
-    if not (root / 'comfy_api' / 'latest').is_dir():
-        raise ValueError('This ComfyUI is too old for native VIDEO / V3 nodes. Update ComfyUI first; its files have not been changed.')
-    candidates = []
-    for parent in (root, root.parent):
-        for name in ('python_embeded', 'python_embedded', '.venv', 'venv', 'env', 'python'):
-            directory = parent / name
-            candidates.extend([directory / 'python.exe', directory / 'Scripts/python.exe', directory / 'bin/python'])
-    python = next((p.resolve() for p in candidates if p.is_file()), None)
-    return dict(root=str(root), python=str(python) if python else None,
-                portable=bool(python and python.parent.name in ('python_embeded', 'python_embedded')))
+    try:
+        selected = resolved(Path(path).expanduser())
+        root = selected / 'ComfyUI' if (selected / 'ComfyUI' / 'main.py').is_file() else selected
+        if not (root / 'main.py').is_file() or not (root / 'folder_paths.py').is_file():
+            raise ValueError('Select the ComfyUI folder, or the portable folder containing ComfyUI.')
+        if not (root / 'comfy_api' / 'latest').is_dir():
+            raise ValueError('This ComfyUI is too old for native VIDEO / V3 nodes. Update ComfyUI first; its files have not been changed.')
+        candidates = []
+        for parent in (root, root.parent):
+            for name in ('python_embeded', 'python_embedded', '.venv', 'venv', 'env', 'python'):
+                directory = parent / name
+                candidates.extend([directory / 'python.exe', directory / 'Scripts/python.exe', directory / 'bin/python'])
+        python = next((p.resolve() for p in candidates if p.is_file()), None)
+        return dict(root=plain(root), python=plain(python) if python else None,
+                    portable=bool(python and python.parent.name in ('python_embeded', 'python_embedded')))
+    except (OSError, ValueError) as error:
+        plain_error(error)
+        raise
 
 
 def host_repair_pending(python):
     """A host repair started in this environment and has not finished (comfy_host's marker)."""
-    return bool(python) and (Path(python).parent.parent / 'freevideo-host-repair.json').exists()
+    return bool(python) and (io_path(python).parent.parent / 'freevideo-host-repair.json').exists()
 
 
 def managed_python(engine, comfy):
     """Find our previously completed frontend without requiring its full disk budget again."""
+    engine, comfy = io_path(engine), io_path(comfy)
     try:
         record = json.loads((engine / 'launcher/comfy-host.json').read_text(encoding='utf-8'))
         identity = record['identity']
-        environment, python = Path(record['environment']), Path(record['python'])
+        environment, python = io_path(record['environment']), io_path(record['python'])
         machine = json.loads((engine / 'machine.json').read_text(encoding='utf-8'))
-        if (identity['comfy'] != str(comfy) or identity['engine_python'] != machine['python']
+        if (identity['comfy'] != plain(comfy) or identity['engine_python'] != machine['python']
                 or identity['requirements'] != hashlib.sha256((comfy / 'requirements.txt').read_bytes()).hexdigest()
                 or environment.resolve().parent != (engine / 'envs').resolve()
                 or python != environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
                 or json.loads((environment / 'freevideo-host.json').read_text(encoding='utf-8')) != identity
                 or not python.is_file()):
             return None
-        return str(python)
+        return plain(python)
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
 
+@plain_errors
 def managed_frontend(selected):
     """Identify our frontend even after reopening makes `separate` false.
 
     Do not resolve the executable: venv Python is a symlink on Linux, but its
     environment and installed packages still belong to the venv directory.
     """
-    python = Path(os.path.abspath(selected['python']))
+    python = io_path(os.path.abspath(selected['python']))
     environment = python.parent.parent
     return (python.parent.name in ('Scripts', 'bin')
             and environment.name.startswith('comfyui-')
-            and environment.parent.resolve() == (Path(selected['engine']) / 'envs').resolve())
+            and environment.parent.resolve() == (io_path(selected['engine']) / 'envs').resolve())
 
 
 # Run with the host's Python, without importing Torch or creating __pycache__.
@@ -179,7 +245,7 @@ def probe_host(descriptor, python=None):
     try:
         from .windows_ux import external_python
         with external_python():
-            result = subprocess.run([str(python), '-I', '-B', '-c', HOST_PROBE, descriptor['root']],
+            result = execution_paths.run([str(python), '-I', '-B', '-c', HOST_PROBE, descriptor['root']],
                                     cwd=descriptor['root'], env=env, capture_output=True, text=True,
                                     encoding='utf-8', errors='replace', timeout=45,
                                     **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
@@ -267,20 +333,21 @@ def next_free_address(url, count=12):
     return None
 
 
+@plain_errors
 def launcher_comfy(selected, info):
     """Whether the launcher downloaded this ComfyUI and runs it in its own environment, and the
     server at its address is not this ComfyUI. Such a server belongs to someone else, so this
     ComfyUI can move to another port instead of asking for that server to be closed."""
-    root = Path(selected['root'])
+    root = io_path(selected['root'])
     if not (selected.get('python') and managed_frontend(selected) and (root / RECEIPT).is_file()):
         return False
     if info['status'] == 'freevideo':
-        return Path(info['comfy_root']).resolve() != root.resolve()
+        return resolved(info['comfy_root']) != root.resolve()
     if info['status'] == 'offline':
         return True
     main = info.get('main') or ''
     if Path(main).is_absolute():
-        return Path(main).resolve() != (root / 'main.py').resolve()
+        return resolved(main) != (root / 'main.py').resolve()
     try:
         # ComfyUI answers {kind: [absolute folders]}; its custom_nodes folder names its installation.
         folders = get_json(selected['url'] + '/internal/folder_paths', timeout=1)
@@ -288,7 +355,7 @@ def launcher_comfy(selected, info):
         if (not isinstance(nodes, list) or not nodes
                 or not all(isinstance(path, str) and Path(path).is_absolute() for path in nodes)):
             return False
-        return all(Path(path).resolve() != (root / 'custom_nodes').resolve() for path in nodes)
+        return all(resolved(path) != (root / 'custom_nodes').resolve() for path in nodes)
     except (OSError, ValueError):
         return False
 
@@ -302,14 +369,15 @@ def queue_busy(url):
         return False
 
 
+@plain_errors
 def matches_server(info, root, engine, source):
     return (info.get('status') == 'freevideo'
-            and all(info.get(k) and Path(info[k]).resolve() == Path(p).resolve()
+            and all(info.get(k) and resolved(info[k]) == resolved(p)
                     for k, p in (('comfy_root', root), ('engine_root', engine), ('source', source))))
 
 
 def node_target(root):
-    parent = Path(root) / 'custom_nodes'
+    parent = io_path(root) / 'custom_nodes'
     found = []
     if parent.is_dir():
         for path in parent.iterdir():
@@ -323,7 +391,7 @@ def node_target(root):
     target = found[0] if found else parent / 'FreeVideo'
     if target.exists() and not found and any(target.iterdir()):
         raise ValueError('custom_nodes/FreeVideo already contains unrelated files. Choose another ComfyUI or rename that folder first.')
-    return target
+    return Path(plain(target))
 
 
 GIT_IGNORE = ('# FreeVideo engine: environments, models and caches, not part of any git checkout.\n'
@@ -338,7 +406,7 @@ def shield_engine(engine):
     git add -A, git clean) would copy it into git or move it away. Only the
     launcher's engine folders get the marker, never a source checkout.
     """
-    engine = Path(engine)
+    engine = io_path(engine)
     marker = engine / '.gitignore'
     if (not engine.is_dir() or os.path.lexists(marker) or (engine / '.git').exists()
             or (engine / 'freevideo_engine').is_dir()):
@@ -354,13 +422,13 @@ def checkout_entry(data, folder):
     """A FreeVideo checkout's own entry point, put back by git, a node updater or a copied repository."""
     text = data.decode('utf-8', 'replace')
     return ('async def comfy_entrypoint' in text and 'from .freevideo_engine.' in text
-            and (Path(folder) / 'freevideo_engine' / 'comfy_nodes.py').is_file())
+            and (io_path(folder) / 'freevideo_engine' / 'comfy_nodes.py').is_file())
 
 
 def deploy(root, source, engine):
     """Update only our entry point; preserve source edits, libraries and templates."""
-    root, source, engine = map(lambda p: Path(p).resolve(), (root, source, engine))
-    target = node_target(root)
+    root, source, engine = map(resolved, (root, source, engine))
+    target = io_path(node_target(root))
     receipt = target / 'freevideo-launcher.json'
     previous = json.loads(receipt.read_text(encoding='utf-8')) if receipt.is_file() else {}
     check_source_release(source, previous.get('source'))
@@ -370,13 +438,15 @@ def deploy(root, source, engine):
     old = entry.read_bytes() if entry.is_file() else None
     if (old and previous.get('entry_sha256') and hashlib.sha256(old).hexdigest() != previous['entry_sha256']
             and not checkout_entry(old, target)):
-        raise ValueError(f'The managed FreeVideo entry point ({entry}) was edited. Changes are retained; '
+        raise ValueError(f'The managed FreeVideo entry point ({plain(entry)}) was edited. Changes are retained; '
                          'undo them or delete that file before updating.')
     # The small loader may be replaced; all original checkout files remain intact.
     code = ("# Installed by FreeVideo launcher. Original entry points are retained in the engine launcher/backups folder.\n"
             "import importlib.util as _util\nimport json as _json\nfrom pathlib import Path as _Path\nimport sys as _sys\n"
             "_record = _json.loads((_Path(__file__).parent / 'freevideo-launcher.json').read_text(encoding='utf-8'))\n"
             "_source = _Path(_record['source'])\n"
+            # The receipt keeps the real folder; beyond the path limit the source is read from the short root.
+            + launch_view.entry_lines(launch_view.for_engine(engine)) +
             "_spec = _util.spec_from_file_location(__name__ + '._engine', _source / '__init__.py', submodule_search_locations=[str(_source)])\n"
             "_engine = _util.module_from_spec(_spec)\n_sys.modules[_spec.name] = _engine\n_spec.loader.exec_module(_engine)\n"
             "WEB_DIRECTORY = str(_source / 'web')\ncomfy_entrypoint = _engine.comfy_entrypoint\n").encode()
@@ -385,8 +455,8 @@ def deploy(root, source, engine):
         backup.parent.mkdir(parents=True, exist_ok=True)
         if not backup.exists():
             backup.write_bytes(old)
-    save(source / 'comfyui.json', dict(installation=str(engine)))
-    save(receipt, dict(protocol=PROTOCOL, source=str(source), engine_root=str(engine), entry_sha256=hashlib.sha256(code).hexdigest()))
+    save(source / 'comfyui.json', dict(installation=plain(engine)))
+    save(receipt, dict(protocol=PROTOCOL, source=plain(source), engine_root=plain(engine), entry_sha256=hashlib.sha256(code).hexdigest()))
     temporary = entry.with_suffix('.py.launcher-tmp')
     temporary.write_bytes(code)
     os.replace(temporary, entry)
@@ -400,8 +470,8 @@ def deploy(root, source, engine):
             file = parent / ('FreeVideo-All-in-One-' + digest + '.json')
         if not file.exists():
             file.write_bytes(template)
-        saved.append(str(file))
-    return dict(node=str(target), workflows=saved)
+        saved.append(plain(file))
+    return dict(node=plain(target), workflows=saved)
 
 
 class LauncherRunner(SetupRunner):
@@ -422,6 +492,7 @@ class Controller:
         self.thread = None
         self.cancelled = threading.Event()
         self.server = None
+        self.server_url = None
         self._server_lock = threading.RLock()
         self._closed = False
         self.server_log = None
@@ -460,6 +531,7 @@ class Controller:
         self._old_versions_thread = threading.Thread(target=work, name='freevideo-old-versions', daemon=True)
         self._old_versions_thread.start()
 
+    @plain_errors
     def _prepare_frontend(self, selected, *, download=False, repair=False):
         """Bring the separate ComfyUI environment up to date with this ComfyUI.
 
@@ -485,16 +557,23 @@ class Controller:
             arguments.append('--repair')
         self.setup.runner.start('comfy-host', selected['engine'], arguments)
         self._wait_setup()
-        descriptor = json.loads((Path(selected['engine']) / 'launcher' / 'comfy-host.json').read_text(encoding='utf-8'))
-        selected['python'] = descriptor['python']
+        descriptor = json.loads((io_path(selected['engine']) / 'launcher' / 'comfy-host.json').read_text(encoding='utf-8'))
+        selected['python'] = plain(descriptor['python'])
 
     def owns_server(self):
         return self.server is not None and self.server.poll() is None
 
-    def stop_owned_server(self):
+    def stop_owned_server(self, *, grace=5):
         with self._server_lock:
             if self.server is not None:
-                processes.stop(self.server, grace=5)
+                if self.server.poll() is None and self.server_url:
+                    try:
+                        cancel_running_generation(self.server_url)
+                    except Exception:
+                        # Even failure to start the bounded helper must not
+                        # prevent the original process-tree cleanup.
+                        pass
+                processes.stop(self.server, grace=grace)
                 self.server = None
 
     def terminal_sources(self):
@@ -516,22 +595,26 @@ class Controller:
         # authority over an existing server. Never scan entire run directories.
         self.server_log = None
         try:
-            root = Path(engine) / 'launcher'
+            root = io_path(engine) / 'launcher'
             value = json.loads((root / 'comfy-console.json').read_text(encoding='utf-8'))
             path = (root / value['log']).resolve()
             path.relative_to((root / 'comfy-runs').resolve())
             if path.is_file():
-                self.server_log = path
+                self.server_log = Path(plain(path))
         except (OSError, ValueError, KeyError, TypeError):
             pass
 
     def attach_console(self, info):
         if info.get('console_log'):
-            root = Path(self.selection['engine']) / 'launcher'
-            path = Path(info['console_log']).resolve()
-            path.relative_to((root / 'comfy-runs').resolve())
-            self.server_log = path
-            save(root / 'comfy-console.json', dict(log=str(path.relative_to(root.resolve()))))
+            try:
+                root = io_path(self.selection['engine']) / 'launcher'
+                path = resolved(info['console_log'])
+                path.relative_to((root / 'comfy-runs').resolve())
+                self.server_log = Path(plain(path))
+                save(root / 'comfy-console.json', dict(log=str(path.relative_to(root.resolve()))))
+            except (OSError, ValueError) as error:
+                plain_error(error)
+                raise
         elif info.get('console_error'):
             self.state = dict(self.state, error=info['console_error'])
 
@@ -550,21 +633,21 @@ class Controller:
                     return False
                 selected_engine = values.get('engine') or str(Path(layout(selected_root)['root']) / 'FreeVideo-engine')
             descriptor = layout(selected_root)
-            engine = Path(selected_engine).expanduser().resolve()
-            receipt_path = node_target(descriptor['root']) / 'freevideo-launcher.json'
+            engine = Path(plain(resolved(Path(selected_engine).expanduser())))
+            receipt_path = io_path(node_target(descriptor['root'])) / 'freevideo-launcher.json'
             receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
-            source = Path(receipt['source']).resolve()
-            if (receipt.get('protocol') != PROTOCOL or Path(receipt['engine_root']).resolve() != engine
-                    or not (source / 'freevideo_engine/comfy_nodes.py').is_file()
-                    or not (source / '__init__.py').is_file()
+            source = Path(plain(resolved(receipt['source'])))
+            if (receipt.get('protocol') != PROTOCOL or Path(plain(resolved(receipt['engine_root']))) != engine
+                    or not io_path(source / 'freevideo_engine/comfy_nodes.py').is_file()
+                    or not io_path(source / '__init__.py').is_file()
                     or hashlib.sha256((receipt_path.parent / '__init__.py').read_bytes()).hexdigest() != receipt.get('entry_sha256')):
                 return False
             installation(source, {'FREEVIDEO_HOME': str(engine)})
             python = (record.get('python') or values.get('python') or
                       managed_python(engine, Path(descriptor['root'])) or descriptor.get('python'))
-            if not python or not Path(python).is_file():
+            if not python or not io_path(python).is_file():
                 return False
-            self.selection = dict(descriptor, source=str(source), engine=str(engine), python=str(python),
+            self.selection = dict(descriptor, source=str(source), engine=str(engine), python=plain(python),
                 url=local_url(record.get('url') or values.get('url', '')), ready=True,
                 separate=record.get('separate', values.get('separate', False)))
             from .desktop_runtime import matching_source
@@ -638,10 +721,7 @@ class Controller:
         try:
             self.cancel()
         finally:
-            with self._server_lock:
-                if self.server is not None:
-                    processes.stop(self.server, grace=3)
-                    self.server = None
+            self.stop_owned_server(grace=3)
 
     def _wait_setup(self):
         # The Setup service and its runner stay the single source of truth.
@@ -662,6 +742,7 @@ class Controller:
                 return row
             self.cancelled.wait(.1)
 
+    @plain_errors
     def _inspect(self, values):
         self.selection = None
         self.sections, self.section = [], None
@@ -669,7 +750,7 @@ class Controller:
         fresh = values.get('new_comfy', False)
         descriptor = new_layout(values.get('destination', '')) if fresh else layout(values['comfy'])
         default_parent = Path(descriptor['root']).parent if fresh else Path(descriptor['root'])
-        engine = Path(values.get('engine') or default_parent / 'FreeVideo-engine').expanduser().resolve()
+        engine = Path(plain(resolved(Path(values.get('engine') or default_parent / 'FreeVideo-engine').expanduser())))
         check_installed_sources(self.source, descriptor['root'], engine)
         if fresh and Path(descriptor['root']) in engine.parents:
             raise ValueError('Place the engine beside the new ComfyUI folder, so ComfyUI can be downloaded atomically.')
@@ -710,7 +791,7 @@ class Controller:
             extra = extra + ([values['models']] if values.get('models') else [])
             # A saved folder that no longer exists (for example a removed offline
             # package) has nothing to reuse; it must not stop the installation.
-            extra = [p for p in dict.fromkeys(extra) if p.strip() and Path(p).expanduser().is_dir()]
+            extra = [p for p in dict.fromkeys(extra) if p.strip() and io_path(Path(p).expanduser()).is_dir()]
             self.setup.inspect(dict(root=str(engine), extra_libraries=extra, copy=False,
                 sampling_caches=bool(values.get('sampling_caches')), prepared_format=values.get('prepared_format'),
                 frontend=dict(root=descriptor['root'], separate=descriptor['separate'], download=fresh,
@@ -718,7 +799,7 @@ class Controller:
             row = self._wait_setup()
             self.state = dict(self.state, plan=row['plan'])
         extra_disk, disks, disk_errors = disk_review(self.state.get('plan', {}), engine, descriptor['root'],
-            separate=descriptor['separate'], new_comfy=fresh and not Path(descriptor['root']).exists())
+            separate=descriptor['separate'], new_comfy=fresh and not io_path(descriptor['root']).exists())
         errors = list(self.state.get('plan', {}).get('errors', []))
         self.state = dict(self.state, status='review', extra_disk_bytes=extra_disk, disks=disks,
                           errors=list(dict.fromkeys(errors + disk_errors)))
@@ -750,7 +831,7 @@ class Controller:
             raise RuntimeError('Stopped; files retained')
         # The engine's Python imports the source its editable install names (commands, direct runs):
         # move it to this source too. Only a real switch stops our idle ComfyUI first.
-        machine = json.loads((Path(selected['engine']) / 'machine.json').read_text(encoding='utf-8'))
+        machine = json.loads((io_path(selected['engine']) / 'machine.json').read_text(encoding='utf-8'))
         if engine_binding.pending(machine, selected['source']):
             # Whoever started it (another launcher, the freevideo command), a ComfyUI of this installation
             # that is generating keeps its packages: the switch waits for the job.
@@ -800,6 +881,7 @@ class Controller:
         self.ensure_shortcut()
         self.state = dict(self.state, status='open' if previous_status == 'open' else 'ready')
 
+    @plain_errors
     def _connect(self):
         self.state = {key: value for key, value in self.state.items() if key != 'moved_from'}
         if not self.selection or not self.selection['ready']:
@@ -872,11 +954,11 @@ class Controller:
                     parsed = urlsplit(url)
                     continue
                 raise ValueError('This port is in use by another application. Set a different local ComfyUI address.') from error
-        if not selected.get('python') or not Path(selected['python']).is_file():
+        if not selected.get('python') or not io_path(selected['python']).is_file():
             raise ValueError('ComfyUI Python is missing. Inspect again to prepare a separate environment.')
-        directory = Path(selected['engine']) / 'launcher' / 'comfy-runs' / (time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(4))
+        directory = io_path(selected['engine']) / 'launcher' / 'comfy-runs' / (time.strftime('%Y%m%dT%H%M%S') + '-' + secrets.token_hex(4))
         directory.mkdir(parents=True)
-        self.server_log = directory / 'comfy.log'
+        self.server_log = Path(plain(directory / 'comfy.log'))
         save(Path(selected['engine']) / 'launcher/comfy-console.json',
              dict(log=str(self.server_log.relative_to(Path(selected['engine']) / 'launcher'))))
         env = (self.child_environment() if self.child_environment is not None else
@@ -901,8 +983,19 @@ class Controller:
                        custom_nodes='FreeVideo' if managed else 'all')
         if selected.get('portable') and not selected['separate']:
             command.append('--windows-standalone-build')
+        view = launch_view.for_engine(selected['engine'])
+        started = command
+        if view.used:
+            # ComfyUI otherwise finds its folders from its own resolved file,
+            # which leads back to the long path.
+            command += ['--base-directory', selected['root']]
+            from . import runtime_alias
+            # Its main imports a library that loads by a resolved path before any FreeVideo node.
+            started = (execution_paths.engine_first(command, selected['source'])
+                       if runtime_alias.system_long_paths() else command)
+        env = launch_view.environment_view(env, view)
         from .windows_ux import external_python
-        with self._server_lock, external_python(), self.server_log.open('wb') as log:
+        with self._server_lock, external_python(), io_path(self.server_log).open('wb') as log:
             if self._closed or self.cancelled.is_set():
                 raise RuntimeError('ComfyUI startup cancelled')
             if managed:
@@ -912,16 +1005,18 @@ class Controller:
             # Keep durable embedded output, but own the whole tree: Windows
             # Job / Linux supervisor also reclaim independently grouped model
             # workers when the launcher dies without running Python cleanup.
-            server = processes.popen(command, cwd=selected['root'], env=env, stdin=subprocess.DEVNULL,
+            server = processes.popen(started, cwd=selected['root'], env=env, stdin=subprocess.DEVNULL,
                 stdout=log, stderr=subprocess.STDOUT, start_new_session=True, supervise=True)
             self.server = server
+            self.server_url = url
         save(directory / 'launch.json', dict(command=command, pid=server.pid, root=selected['root'], url=url, **context))
-        self.state = dict(self.state, task=dict(progress=dict(label='Starting ComfyUI', detail='Loading nodes and the web interface'), log=str(directory)))
+        self.state = dict(self.state, task=dict(progress=dict(label='Starting ComfyUI', detail='Loading nodes and the web interface'), log=plain(directory)))
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             if self.cancelled.is_set():
                 with self._server_lock:
-                    processes.stop(server, grace=3)
+                    if self.server is server:
+                        self.stop_owned_server(grace=3)
                 raise RuntimeError('ComfyUI startup cancelled')
             if server.poll() is not None:
                 from .failure_details import startup_failure

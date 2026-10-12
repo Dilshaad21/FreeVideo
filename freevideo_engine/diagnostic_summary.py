@@ -41,9 +41,21 @@ def summary_report(report):
     result['hardware'].update(_measurements(hardware, ('vram_total','vram_free','ram_total','ram_available')))
     result['offload'] = diagnostic.weight_placement(summary.get('weight_placement'))
     result['sampling_passes'] = diagnostic.sampling_passes(summary.get('sampling_passes') or engine.get('sampling_passes'))
+    if engine.get('device_backend') == 'mps':
+        conditions = diagnostic.mac_conditions_summary(result['sampling_passes'])
+        decode = diagnostic.mapping(engine.get('decode'))
+        if 'conditions' not in decode:
+            decode = diagnostic.mapping(diagnostic.mapping(engine.get('stages')).get('decode'))
+        if conditions or 'conditions' in decode:
+            result['mac_conditions'] = dict(sampling_passes=conditions)
+            if 'conditions' in decode:
+                samples = [diagnostic.mac_condition(sample) for sample in diagnostic.sequence(decode['conditions'])[:2]]
+                result['mac_conditions']['decode_conditions'] = samples
     result['latent_upscale'] = diagnostic.latent_upscale(summary.get('latent_upscale') or engine.get('latent_upscale'))
     decoder = summary.get('decoder_options') or {}
     result['decoder'] = _measurements(decoder, ('resident_blocks',))
+    if 'mac_conditions' in result and 'decode_conditions' in result['mac_conditions']:
+        result['decoder']['conditions'] = result['mac_conditions']['decode_conditions']
     for key in ('offload','prefetch','stream_weights','stream_output','pin_weights','preload','tile_group',
                 'linear_compute_cache'):
         if type(decoder.get(key)) is bool:

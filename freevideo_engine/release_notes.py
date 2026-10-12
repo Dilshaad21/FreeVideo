@@ -7,6 +7,7 @@ import argparse
 import json
 from pathlib import Path
 import re
+from .long_paths import io_path, plain_errors
 
 PRODUCT_VERSION = re.compile(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
 MAX_NOTES_BYTES = 24000
@@ -104,9 +105,10 @@ def optional_fields(value):
     return result
 
 
+@plain_errors
 def catalog(package=None):
     """Builds must fail on incomplete translations, before uploading anything."""
-    package = Path(package) if package is not None else Path(__file__).parent
+    package = io_path(package if package is not None else Path(__file__).parent)
     value = json.loads((package / 'release_notes.json').read_text(encoding='utf-8'))
     version, release = product_version(value.get('product_version')), notes(value)
     if not version or not release:
@@ -127,7 +129,7 @@ def public_details(value):
 
 
 def installed_details(package, fallback=None):
-    package = Path(package)
+    package = io_path(package)
     try:
         from .launcher_update import build_identity
         return public_details(build_identity(json.loads((package / 'build-identity.json').read_text(encoding='utf-8'))))

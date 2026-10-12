@@ -1,35 +1,62 @@
 {
   "schema": 1,
-  "product_version": "0.3.24",
+  "product_version": "0.3.25",
   "en": {
-    "summary": "Compiling after an update now runs in the background while FreeVideo is idle, and Windows PCs with less RAM and 8 GB RTX 30 cards generate faster; Repair handles more cases and offline installations update their engine with the launcher.",
+    "summary": "Offline packages now work on Windows PCs where long-path support is off, and a generation interrupted once no longer slows down later ones.",
     "changes": [
-      "After an update, an installation, a repair or a graphics driver update, FreeVideo compiles in the background while it is idle, which takes two to three minutes, and the first video after that no longer waits for compiling; the background work stops as soon as a video starts.",
-      "Clearing the system's temporary files no longer slows the next video: compiled results are now kept in the FreeVideo folder.",
-      "On Windows PCs with less RAM, each step reads less from the drive, and the second pass of a two-pass video starts sooner; 8 GB RTX 30-series cards also run the second pass of full-size videos faster.",
-      "With prompt enhancement on, a rewrite starts 3–4 seconds sooner. The background preparation uses about 0.7 GiB of RAM and no GPU memory, and it stops when a video starts generating.",
-      "Repair also restores ComfyUI packages whose files were deleted or changed, and replaces model files that differ from the tested version, keeping the original under a new name. When the text encoder folder holds a same-named file of a different size, generation uses the tested one.",
-      "FreeVideo installed from an offline package now updates its engine with the launcher without downloading; an older launcher no longer overwrites a newer FreeVideo, and both versions are shown when they differ.",
-      "When a browser extension interferes with FreeVideo, the error card names the extension and lists ways to fix it.",
-      "View licenses in the license step lists each license you accept, and each one opens; in installations from an offline package the full texts open from this computer, without a connection.",
-      "Fixes: after an engine update, commands run with the engine's own Python use the new FreeVideo; on Linux, Install / repair completes when the uv tool in the installation folder is a link to another location."
+      "On Windows PCs where long-path support is off, which is the Windows default, offline packages now import, start and generate normally with no change to system settings, including in deeply nested folders with very long paths. A folder left half imported by the previous version needs no cleanup: import the package again after updating.",
+      "The Total pixels list in the creation panel no longer offers 1.00 MP, which gave the same size as 0.98 MP · Native. Workflows saved at 1.00 MP open at their original size.",
+      "On Windows PCs whose RAM cannot hold the whole video model, the part of the model that comes from the drive is now read ahead while the rest is computing, so a slow drive holds up each sampling step much less.",
+      "On Windows, the first video at the Max quality level, or at some custom step counts, no longer downloads about 26 GB of extra model files.",
+      "A generation interrupted once no longer slows down later generations. The compatibility level is raised automatically only after two interruptions in a row or a graphics card error, and goes back down after three generations complete normally.",
+      "Closing FreeVideo during a generation now cancels it instead of counting as an interruption. While the compatibility level is raised automatically, the progress says so and shows how many more completed generations are needed before it speeds up.",
+      "The creation panel has a new Available sizes and lengths row under Frame & duration. It opens a map of the picture sizes and lengths that can be generated; hovering shows the estimated time, and clicking fills in the size and length. Not shown on Mac."
     ]
   },
   "zh": {
-    "summary": "更新后的编译改在空闲时于后台完成，内存较小的 Windows 电脑和 8 GB 的 RTX 30 显卡生成更快；“修复”能处理更多情况，离线安装也能随启动器更新引擎。",
+    "summary": "离线包在没有开启长路径支持的 Windows 电脑上也能使用；生成被打断一次后，之后的生成不再变慢。",
     "changes": [
-      "更新、安装、修复或更新显卡驱动后，FreeVideo 会在空闲时于后台完成编译，约两三分钟，之后的第一次生成不用再等编译；开始生成时后台编译会立即停止。",
-      "清理系统临时文件后，下一次生成不再变慢：编译结果改存在 FreeVideo 的目录里。",
-      "内存较小的 Windows 电脑上，生成时每一步从硬盘读取的数据更少，两遍生成的第二遍也开始得更快；8 GB 的 RTX 30 系列显卡上，全尺寸视频的第二遍更快。",
-      "开启提示词增强时，改写开始前少等 3–4 秒。为此 FreeVideo 会在后台提前做好准备，约占 0.7 GiB 内存，不占显存，开始生成视频时自动退出。",
-      "“修复”也会补回 ComfyUI 环境里被删除或改动的包，并把和测试版本不同的模型文件改名保留、换回测试过的版本。生成时如果文本编码器目录里有同名但大小不同的文件，会改用测试过的那份。",
-      "用离线整合包装的 FreeVideo 也会随启动器更新引擎，不用下载；旧启动器不再覆盖新版 FreeVideo，两者版本不同时会分别显示。",
-      "浏览器扩展干扰 FreeVideo 时，出错卡片会写出是哪个扩展，并给出解决办法。",
-      "许可确认里的“查看许可证”会列出要同意的每一项许可，每项都能打开；用离线整合包安装时打开的是本机全文，断网也能看。",
-      "修复：引擎更新后，用引擎自带 Python 运行的命令也会用新版 FreeVideo；Linux 上安装目录里的 uv 被换成链接时，“安装 / 修复”也能完成。"
+      "在没有开启长路径支持的 Windows 电脑上（Windows 的默认设置），离线包现在可以正常导入、启动和生成，不需要更改系统设置；层级很深、路径很长的文件夹也可以。上一版没有导完的文件夹不需要清理，更新后可以直接重新导入。",
+      "创作面板“总像素”的选项里去掉了“1.00 MP”，它和“0.98 MP · 原生”是同一个尺寸；以前用 1.00 MP 保存的工作流打开后尺寸不变。",
+      "内存不足以容纳整个视频模型的 Windows 电脑上，需要从硬盘读取的那部分模型现在会在其余部分计算的同时提前读好，硬盘较慢时每个采样步等待的时间明显缩短。",
+      "在 Windows 上第一次用“极致”档（以及部分自定义步数）生成时，不再额外下载约 26 GB 的模型文件。",
+      "生成被意外中断一次后，之后的生成不再因此变慢：只有连续两次中断或显卡报错，才会自动提高兼容档位；之后连续三次正常完成，档位会自动调回。",
+      "生成过程中关掉 FreeVideo，现在会取消这次生成，不算作中断；兼容档位被自动提高时，生成进度上会说明这一点，并显示再完成几次后会加快。",
+      "创作面板“画幅与时长”下面新增“可生成范围”：展开是一张图，显示可以生成的画面大小和时长；鼠标移到图上会显示预计用时，点击图中的位置会填入对应的大小和时长。Mac 上不显示。"
     ]
   },
   "history": [
+    {
+      "product_version": "0.3.24",
+      "en": {
+        "summary": "Compiling after an update now runs in the background while FreeVideo is idle, and Windows PCs with less RAM and 8 GB RTX 30 cards generate faster; Repair handles more cases and offline installations update their engine with the launcher.",
+        "changes": [
+          "After an update, an installation, a repair or a graphics driver update, FreeVideo compiles in the background while it is idle, which takes two to three minutes, and the first video after that no longer waits for compiling; the background work stops as soon as a video starts.",
+          "Clearing the system's temporary files no longer slows the next video: compiled results are now kept in the FreeVideo folder.",
+          "On Windows PCs with less RAM, each step reads less from the drive, and the second pass of a two-pass video starts sooner; 8 GB RTX 30-series cards also run the second pass of full-size videos faster.",
+          "With prompt enhancement on, a rewrite starts 3–4 seconds sooner. The background preparation uses about 0.7 GiB of RAM and no GPU memory, and it stops when a video starts generating.",
+          "Repair also restores ComfyUI packages whose files were deleted or changed, and replaces model files that differ from the tested version, keeping the original under a new name. When the text encoder folder holds a same-named file of a different size, generation uses the tested one.",
+          "FreeVideo installed from an offline package now updates its engine with the launcher without downloading; an older launcher no longer overwrites a newer FreeVideo, and both versions are shown when they differ.",
+          "When a browser extension interferes with FreeVideo, the error card names the extension and lists ways to fix it.",
+          "View licenses in the license step lists each license you accept, and each one opens; in installations from an offline package the full texts open from this computer, without a connection.",
+          "Fixes: after an engine update, commands run with the engine's own Python use the new FreeVideo; on Linux, Install / repair completes when the uv tool in the installation folder is a link to another location."
+        ]
+      },
+      "zh": {
+        "summary": "更新后的编译改在空闲时于后台完成，内存较小的 Windows 电脑和 8 GB 的 RTX 30 显卡生成更快；“修复”能处理更多情况，离线安装也能随启动器更新引擎。",
+        "changes": [
+          "更新、安装、修复或更新显卡驱动后，FreeVideo 会在空闲时于后台完成编译，约两三分钟，之后的第一次生成不用再等编译；开始生成时后台编译会立即停止。",
+          "清理系统临时文件后，下一次生成不再变慢：编译结果改存在 FreeVideo 的目录里。",
+          "内存较小的 Windows 电脑上，生成时每一步从硬盘读取的数据更少，两遍生成的第二遍也开始得更快；8 GB 的 RTX 30 系列显卡上，全尺寸视频的第二遍更快。",
+          "开启提示词增强时，改写开始前少等 3–4 秒。为此 FreeVideo 会在后台提前做好准备，约占 0.7 GiB 内存，不占显存，开始生成视频时自动退出。",
+          "“修复”也会补回 ComfyUI 环境里被删除或改动的包，并把和测试版本不同的模型文件改名保留、换回测试过的版本。生成时如果文本编码器目录里有同名但大小不同的文件，会改用测试过的那份。",
+          "用离线整合包装的 FreeVideo 也会随启动器更新引擎，不用下载；旧启动器不再覆盖新版 FreeVideo，两者版本不同时会分别显示。",
+          "浏览器扩展干扰 FreeVideo 时，出错卡片会写出是哪个扩展，并给出解决办法。",
+          "许可确认里的“查看许可证”会列出要同意的每一项许可，每项都能打开；用离线整合包安装时打开的是本机全文，断网也能看。",
+          "修复：引擎更新后，用引擎自带 Python 运行的命令也会用新版 FreeVideo；Linux 上安装目录里的 uv 被换成链接时，“安装 / 修复”也能完成。"
+        ]
+      }
+    },
     {
       "product_version": "0.3.23",
       "en": {
@@ -218,67 +245,6 @@
         "summary": "页面文件较小的 Windows 电脑上，生成过程中不再耗尽虚拟内存，权重预读也会一直开着。",
         "changes": [
           "在 Windows 上把模型权重放进内存时，FreeVideo 现在会为本次请求之后还要分配的显存预留虚拟内存（提交内存）。之前页面文件较小的电脑可能在生成中途耗尽虚拟内存：剩下的步骤会关闭权重预读，或者请求中止后减少内存占用再重新开始。在固定页面文件、显存限制为 7 GB 的测试中，原来中途中止重来的请求（851 秒）现在一次完成（622 秒）。"
-        ]
-      }
-    },
-    {
-      "product_version": "0.3.14",
-      "en": {
-        "summary": "When a FreeVideo script fails to load once, the page now recovers by itself, and when the creative workspace cannot be seen, the page or the node says why.",
-        "changes": [
-          "If the browser fails to load one of FreeVideo's scripts while the ComfyUI page opens, the page refreshes its copies of FreeVideo's files and reloads itself once, returning to the address it was opened with. Before, the page stayed incomplete until a hard reload. The automatic reload is skipped once you have clicked or typed on the page.",
-          "If the scripts still fail after that reload, the message says so and suggests Ctrl+F5 or checking browser extensions, and the copied details include what the browser cache held for each failed file.",
-          "If a FreeVideo node is on the canvas but neither the creative workspace nor the toolbar that opens it can be seen, the page now says so and names the cause, such as a stylesheet that did not load. This is checked on every visit and whenever another workflow comes to the front, not only when the launcher opens the page.",
-          "If FreeVideo’s page scripts do not run in the browser at all, the generating node now shows the cause and what to do in its progress text, since the page itself cannot."
-        ]
-      },
-      "zh": {
-        "summary": "FreeVideo 的脚本在页面打开时偶尔加载失败，现在页面会自行恢复；看不到创作面板时，页面或节点会说明原因。",
-        "changes": [
-          "打开 ComfyUI 页面时，如果浏览器有一个 FreeVideo 脚本没能加载，页面会重新下载 FreeVideo 的文件并自动刷新一次，回到最初打开的地址。之前页面会一直不完整，直到手动强制刷新。如果你已经在页面上点击或输入过，就不会自动刷新。",
-          "自动刷新后仍然失败时，提示会说明已经刷新过，并建议按 Ctrl+F5 或检查浏览器插件；复制的详情里还会列出每个失败文件在浏览器缓存中的情况。",
-          "画布上有 FreeVideo 节点、却看不到创作面板和打开它的工具栏时，页面会提示并写明原因，例如某个样式文件没有加载。每次打开页面、切换工作流时都会检查，不再只在从启动器打开时检查。",
-          "如果浏览器完全没有运行 FreeVideo 的页面脚本，页面本身无法提示，生成节点会在进度文字里说明原因和处理办法。"
-        ]
-      }
-    },
-    {
-      "product_version": "0.3.13",
-      "en": {
-        "summary": "Choosing another location for an automatic installation after an offline one now installs there.",
-        "changes": [
-          "After an installation from offline packages, an automatic installation set up in another folder installs into that folder. It no longer reuses the offline installation's engine folder and stops at \"Failed step: vdn-source\".",
-          "An automatic installation pointed at an offline installation's own folder is explained before it starts, with the choice to open that installation or pick another folder."
-        ]
-      },
-      "zh": {
-        "summary": "离线安装之后改用自动安装并选择其他位置时，会安装到新选的位置。",
-        "changes": [
-          "用离线包安装后，在安装设置里换一个位置进行自动安装，会安装到新选的位置；不再沿用离线安装的引擎目录，也不再停在“Failed step: vdn-source”。",
-          "如果自动安装指向离线安装所在的位置，安装计划页会在开始前说明，并提示在启动页直接打开这份安装或换一个位置。"
-        ]
-      }
-    },
-    {
-      "product_version": "0.3.12",
-      "en": {
-        "summary": "Linux setup accepts the Git that current distributions ship and installs its own when needed, offline installs can download the models, the offline text encoder no longer depends on your ComfyUI, and update notes cover every version since yours.",
-        "changes": [
-          "Linux setup no longer stops with \"Missing git\" when Git is older than 2.35. Git 2.17 or newer on the system is used as it is (Ubuntu 22.04 ships 2.34, Ubuntu 20.04 ships 2.25). Without Git, or with an older one, setup downloads Git 2.56 from conda-forge (about 75 MB, every file checked against a pinned SHA-256) into the installation folder; the system is not changed.",
-          "After importing the Environment package, the models step can download the models (49.1 GB) instead of importing model packages. Downloads resume after a stop, and model packages already imported are used first.",
-          "An offline installation's text encoder uses its own copy of ComfyUI's library from the Environment package, so updating or editing that ComfyUI no longer changes prompt encoding.",
-          "When an update skips versions, its notes include each version since the one you have, newest first.",
-          "Downloading the report from the node panel names the file by when it was saved, as the creation panel does."
-        ]
-      },
-      "zh": {
-        "summary": "Linux 安装可直接使用各发行版自带的 Git，必要时自行安装；离线安装可以改为自动下载模型；离线安装的文本编码器不再受 ComfyUI 改动影响；更新说明会列出从当前版本以来的每个版本。",
-        "changes": [
-          "Linux 安装不再因 Git 低于 2.35 而提示「缺少 git」。系统中 2.17 及以上的 Git 直接使用（Ubuntu 22.04 自带 2.34，Ubuntu 20.04 自带 2.25）；没有 Git 或版本更低时，安装程序从 conda-forge 下载 Git 2.56（约 75 MB，每个文件按固定的 SHA-256 校验）装到安装目录内，不改动系统。",
-          "导入运行环境包后，模型这一步可以选择自动下载（49.1 GB），不必再导入模型包。下载中断后可以续传，已导入的模型包优先使用。",
-          "离线安装的文本编码器改用运行环境包内 ComfyUI 库的独立副本，更新或修改该 ComfyUI 不再影响提示词编码。",
-          "跨版本更新时，更新说明会按从新到旧列出当前版本之后的每个版本。",
-          "在节点视图下载报告时，文件按保存时间命名，与创作面板一致。"
         ]
       }
     }

@@ -16,8 +16,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from . import execution_paths
 from .diagnostics import Redactor
 from .monitoring import save
+from .long_paths import io_path, resolved, plain, plain_text, plain_errors
 from . import disk_space
 
 REPOSITORY = 'FlashML-org/FreeVideo'
@@ -90,7 +92,7 @@ def current_build():
     if not getattr(sys, 'frozen', False):
         return None
     try:
-        return build_identity(json.loads((Path(sys._MEIPASS) / 'launcher-build.json').read_text(encoding='utf-8')))
+        return build_identity(json.loads((io_path(sys._MEIPASS) / 'launcher-build.json').read_text(encoding='utf-8')))
     except (OSError, ValueError, TypeError):
         return None
 
@@ -226,9 +228,10 @@ def check(current, token=''):
     return candidate if newer(candidate, current) else None
 
 
+@plain_errors
 def checksum(path):
     digest = hashlib.sha256()
-    with path.open('rb') as stream:
+    with io_path(path).open('rb') as stream:
         for block in iter(lambda: stream.read(256*1024), b''):
             digest.update(block)
     return digest.hexdigest()
@@ -236,24 +239,27 @@ def checksum(path):
 
 def verified(path, asset):
     try:
+        path = io_path(path)
         return (path.is_file() and not path.is_symlink() and path.stat().st_size == asset['bytes']
                 and checksum(path) == asset['sha256'])
     except OSError:
         return False
 
 
+@plain_errors
 def executable_path(root, candidate):
     filename = RELEASE_ASSETS[candidate['channel']][0]
-    return Path(root).absolute().resolve() / 'updates' / candidate['asset']['sha256'] / filename
+    return Path(plain(resolved(root))) / 'updates' / candidate['asset']['sha256'] / filename
 
 
+@plain_errors
 def download(candidate, root, token='', *, progress=None, cancel=None):
     candidate = manifest(candidate)
     asset = candidate['asset']
     target = executable_path(root, candidate)
     if verified(target, asset):
         return target
-    target.parent.mkdir(parents=True, exist_ok=True)
+    io_path(target.parent).mkdir(parents=True, exist_ok=True)
     # Each attempt owns one stage. Failed stages cannot be resumed, so discard
     # only ours; never touch another attempt, the original launcher or models.
     import tempfile
@@ -264,8 +270,8 @@ def download(candidate, root, token='', *, progress=None, cancel=None):
     stage = None
     try:
         with open_download(API + '/releases/assets/' + str(asset['id']), token, binary=True) as response:
-            with tempfile.NamedTemporaryFile(prefix='download-', suffix='.partial', dir=target.parent, delete=False) as stream:
-                stage = Path(stream.name)
+            with tempfile.NamedTemporaryFile(prefix='download-', suffix='.partial', dir=io_path(target.parent), delete=False) as stream:
+                stage = Path(plain(stream.name))
                 digest = hashlib.sha256()
                 for block in _bytes(response, asset['bytes'], cancel, seconds=1800):
                     stream.write(block); digest.update(block); done += len(block)
@@ -280,13 +286,13 @@ def download(candidate, root, token='', *, progress=None, cancel=None):
         if cancel is not None and cancel.is_set():
             raise InterruptedError('Update stopped before activation')
         if build_target(candidate) == 'linux-x86_64':
-            stage.chmod(0o755)  # An AppImage runs itself.
-        stage.replace(target)
+            io_path(stage).chmod(0o755)  # An AppImage runs itself.
+        io_path(stage).replace(io_path(target))
         return target
     finally:
         if stage is not None:
             try:
-                stage.unlink(missing_ok=True)
+                io_path(stage).unlink(missing_ok=True)
             except OSError:
                 pass  # A cleanup failure must not mask the download error.
 
@@ -295,6 +301,7 @@ class DownloadedLauncherUnavailable(ValueError):
     """The cached executable needs downloading again before it can be started."""
 
 
+@plain_errors
 def launch_download(candidate, root, *, token='', popen=None):
     candidate = manifest(candidate)
     if build_target(candidate) == 'macos-arm64':
@@ -303,7 +310,7 @@ def launch_download(candidate, root, *, token='', popen=None):
     if not verified(path, candidate['asset']):
         raise DownloadedLauncherUnavailable('Downloaded launcher is missing or changed; download again')
     from .linux_bundle import child_environment
-    env = dict(child_environment(), FREEVIDEO_LAUNCHER_HOME=str(Path(root).absolute().resolve()))
+    env = dict(child_environment(), FREEVIDEO_LAUNCHER_HOME=plain(resolved(root)))
     if token:
         env['GITHUB_TOKEN'] = token  # Session only; never stored in a receipt or command.
     kwargs = dict(cwd=path.parent, env=env, close_fds=True)
@@ -311,7 +318,7 @@ def launch_download(candidate, root, *, token='', popen=None):
         kwargs['creationflags'] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         kwargs['start_new_session'] = True
-    process = (popen or subprocess.Popen)([str(path)], **kwargs)
+    process = (popen or execution_paths.popen)([str(path)], **kwargs)
     # Start first: a spawn error must not replace the approved startup receipt.
     save(Path(root) / 'updates' / 'active.json', dict(approved=True, candidate=candidate))
     return process
@@ -322,13 +329,13 @@ def forward_approved(current, root):
     if current.get('packaging') in ('onedir', 'app'):
         return False  # Keep the user's folder distribution; do not switch to onefile.
     try:
-        receipt = json.loads((Path(root)/'updates/active.json').read_text(encoding='utf-8'))
+        receipt = json.loads((io_path(root)/'updates/active.json').read_text(encoding='utf-8'))
         if receipt.get('approved') is not True:
             return False
         candidate = manifest(receipt.get('candidate'))
         if not newer(candidate, current):
             return False
-        if executable_path(root, candidate).resolve() == Path(sys.executable).resolve():
+        if resolved(executable_path(root, candidate)) == resolved(sys.executable):
             return False  # A bad release identity must never recursively launch itself.
         launch_download(candidate, root)
         return True
@@ -351,7 +358,7 @@ def resumed_update(current, root, *, seconds=600):
     original shortcut later forwards here again, so a marker prevents a second
     automatic engine update for the same build.
     """
-    updates = Path(root) / 'updates'
+    updates = io_path(root) / 'updates'
     try:
         receipt = updates / 'active.json'
         value = json.loads(receipt.read_text(encoding='utf-8'))
@@ -378,10 +385,11 @@ def resumed_update(current, root, *, seconds=600):
 
 
 class UpdateClient:
+    @plain_errors
     def __init__(self, current, root, token=None):
         # Python 3.9 on Windows can leave a nonexistent relative path relative
         # in resolve(). Updates must survive changing cwd to the EXE directory.
-        self.current, self.root = build_identity(current), Path(root).absolute().resolve()
+        self.current, self.root = build_identity(current), Path(plain(resolved(root)))
         self.token = token if token is not None else os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN', '')
         self.state = dict(status='idle')
         self.available = None
@@ -389,7 +397,7 @@ class UpdateClient:
         # cached reminder; a known newer version never prevents using this one.
         for name in ('available.json', 'required.json'):
             try:
-                candidate = manifest(json.loads((self.root / 'updates' / name).read_text(encoding='utf-8')))
+                candidate = manifest(json.loads((io_path(self.root) / 'updates' / name).read_text(encoding='utf-8')))
                 if newer(candidate, self.current) and (self.available is None or newer(candidate, self.available)):
                     self.available = candidate
             except (OSError, ValueError, TypeError):
@@ -430,7 +438,7 @@ class UpdateClient:
             except Exception as error:
                 if quiet:
                     return  # The next periodic check retries without a reminder.
-                message = Redactor([(self.token, '<REDACTED>')] if self.token else []).text(str(error))
+                message = Redactor([(self.token, '<REDACTED>')] if self.token else []).text(plain_text(error))
                 if isinstance(error, urllib.error.HTTPError) and error.code in (401, 403, 404):
                     message = 'GitHub update access unavailable. A private repository needs a GitHub token with read access; also check API rate limits.'
                 self.state = dict(status='cancelled' if self.cancelled.is_set() else 'error', error=message,

@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 
+from .long_paths import io_path, resolved, plain, plain_errors
 from . import network
 from .monitoring import save
 
@@ -9,15 +10,17 @@ RECEIPT = '.freevideo-comfy-source.json'
 SOURCE_DISK_BYTES = 2**30
 
 
+@plain_errors
 def specification():
     # The same revision already supplies the native H3 encoder. Fetch the full
     # application separately; never expand or modify the encoder's sparse tree.
-    spec = json.loads((Path(__file__).parent / 'dependencies.json').read_text(encoding='utf-8'))['encoder']
+    spec = json.loads((io_path(Path(__file__).parent) / 'dependencies.json').read_text(encoding='utf-8'))['encoder']
     return dict(url=spec['comfy_url'], commit=spec['comfy_commit'])
 
 
+@plain_errors
 def validate_target(target):
-    target = Path(target)
+    target = io_path(target)
     if not target.exists() and not target.is_symlink():
         return
     try:
@@ -25,18 +28,19 @@ def validate_target(target):
     except (OSError, ValueError):
         owned = False
     if not owned or target.is_symlink():
-        raise ValueError('This folder already contains ComfyUI or other files. Choose Use existing ComfyUI or another installation folder: ' + str(target))
+        raise ValueError('This folder already contains ComfyUI or other files. Choose Use existing ComfyUI or another installation folder: ' + plain(target))
 
 
+@plain_errors
 def new_layout(directory):
     if not isinstance(directory, str) or not directory.strip():
         raise ValueError('Choose a folder for the new ComfyUI installation')
-    parent = Path(directory).expanduser().resolve()
+    parent = resolved(Path(directory).expanduser())
     if parent.exists() and not parent.is_dir():
-        raise ValueError('The installation folder is a file: ' + str(parent))
+        raise ValueError('The installation folder is a file: ' + plain(parent))
     target = parent / 'ComfyUI'
     validate_target(target)
-    return dict(root=str(target), python=None, portable=False, separate=True,
+    return dict(root=plain(target), python=None, portable=False, separate=True,
                 new_comfy=True, source_spec=specification())
 
 

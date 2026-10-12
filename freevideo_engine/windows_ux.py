@@ -50,11 +50,25 @@ def open_browser(url):
 
 
 
-def open_text(path):
+def _viewer_path(path, engine):
+    """A text in an installation deeper than the viewer can open, named through that installation's short folder."""
+    from . import launch_view
+    from .long_paths import plain
+    path = plain(path)
+    try:
+        # The file's own runtime first: it can be another one than the selected.
+        view = launch_view.for_file(path) or (launch_view.for_engine(engine) if engine else launch_view.current())
+    except OSError:
+        return path  # No short folder can be made: the viewer gets the path as it is.
+    return path if view is None else str(launch_view.value(path, view))
+
+
+def open_text(path, *, engine=None):
     """Show a text file on this computer (a licence, the notices) in the system's text viewer."""
     path = str(path)
     with external_python():
         if windows():
+            path = _viewer_path(path, engine)
             if path.lower().endswith('.txt'):
                 import os
                 os.startfile(path)

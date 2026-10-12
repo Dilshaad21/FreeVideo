@@ -13,6 +13,7 @@ import sys
 import threading
 import uuid
 
+from .long_paths import io_path, resolved, plain, plain_text, plain_errors
 from .comfy_bridge import installation, installation_root, source_root
 from .environments import ENVIRONMENTS
 from .desktop_runtime import Runner, preflight_json
@@ -50,9 +51,9 @@ def discover_libraries(folder_paths, environ=None):
     existing = []
     for value in candidates:
         try:
-            path = Path(value).expanduser()
+            path = io_path(Path(value).expanduser())
             if path.is_dir():
-                existing.append(str(path))
+                existing.append(plain(path))
         except (OSError, RuntimeError):
             pass
     # A folder registered under several model types is listed once; finding
@@ -126,6 +127,7 @@ class Events:
 def owned_comfy(root, host):
     """./setup.sh puts the ComfyUI it installs in <engine>/ComfyUI; that one is the engine's own."""
     from .comfy_source import RECEIPT, specification
+    root, host = io_path(root), io_path(host)
     try:
         return host == root / 'ComfyUI' and json.loads((host / RECEIPT).read_text(encoding='utf-8')) == specification()
     except (OSError, ValueError):
@@ -133,8 +135,9 @@ def owned_comfy(root, host):
 
 
 class Setup:
+    @plain_errors
     def __init__(self, source, folder_paths, runner_factory=SetupRunner):
-        self.source = Path(source).resolve()
+        self.source = Path(plain(resolved(source)))
         self.folder_paths = folder_paths
         self.events = Events()
         self.logs = self.source / '.freevideo' / 'comfy-setup'
@@ -213,14 +216,15 @@ class Setup:
             raise ValueError('Unknown compatibility action')
         return result
 
+    @plain_errors
     def validate_root(self, value):
         if not isinstance(value, str) or not value.strip() or len(value) > 4096:
             raise ValueError('Choose an engine installation folder')
-        root = Path(value).expanduser().resolve()
-        host = Path(self.folder_paths.base_path).resolve()
+        root = resolved(Path(value).expanduser())
+        host = resolved(self.folder_paths.base_path)
         if root == Path(root.anchor) or root == host or (root in host.parents and not owned_comfy(root, host)):
             raise ValueError('Use a dedicated FreeVideo folder, not the ComfyUI root or its parent')
-        prefix = Path(sys.prefix).resolve()
+        prefix = resolved(sys.prefix)
         # Refuse to pip into the interpreter that is running, and nothing more.
         # The earlier test asked whether the live interpreter lived anywhere
         # under `root/envs`, which is true of every working installation the
@@ -235,10 +239,11 @@ class Setup:
                              'running in. Launch ComfyUI from its own environment, or run '
                              'setup from the FreeVideo launcher instead of this panel.')
         selected = os.environ.get('FREEVIDEO_HOME')
-        if selected and installation_root(self.source) != root:
+        if selected and resolved(installation_root(self.source)) != root:
             raise ValueError('FREEVIDEO_HOME selects another installation. Change it before starting ComfyUI.')
-        return root
+        return Path(plain(root))
 
+    @plain_errors
     def inspect(self, value):
         self.status()
         if self.runner.busy:
@@ -251,7 +256,7 @@ class Setup:
         # automatically fill the remaining places.
         chosen = library_roots(extra)
         libraries = library_roots(chosen + discover_libraries(self.folder_paths), keep_first=True)
-        self.logs.mkdir(parents=True, exist_ok=True)
+        io_path(self.logs).mkdir(parents=True, exist_ok=True)
         manifest = self.logs / ('libraries-' + uuid.uuid4().hex + '.json')
         save(manifest, dict(version=1, roots=libraries))
         # A download that cannot resume (for example a Xet partial) starts again
@@ -259,7 +264,7 @@ class Setup:
         arguments = ['setup', '--reuse-models-manifest', str(manifest), '--allow-model-restart']
         frontend = value.get('frontend')
         if frontend:
-            arguments += ['--frontend-root', str(Path(frontend['root']).expanduser().resolve())]
+            arguments += ['--frontend-root', plain(resolved(Path(frontend['root']).expanduser()))]
             if frontend.get('separate'):
                 arguments.append('--frontend-separate')
             if frontend.get('download'):
@@ -279,10 +284,11 @@ class Setup:
         self.runner.start('plan', root, [*arguments, '--plan', '--json'])
         return self.status()
 
+    @plain_errors
     def bind(self, root):
         root = self.validate_root(root)
         installation(self.source, dict(os.environ, FREEVIDEO_HOME=str(root)))
-        config = self.source / 'comfyui.json'
+        config = io_path(self.source) / 'comfyui.json'
         value = json.loads(config.read_text(encoding='utf-8')) if config.is_file() else {}
         value['installation'] = str(root)
         save(config, value)
@@ -381,6 +387,7 @@ class Setup:
         memory.unload_all_models()
         memory.soft_empty_cache()
 
+    @plain_errors
     def status(self):
         for kind, value in self.events.drain():
             if kind == 'started':
@@ -395,7 +402,7 @@ class Setup:
                     # Older/bootstrap failures may not emit a structured error.
                     # Recover the complete retained output once, after exit.
                     try:
-                        self.state['error'] = (Path(value['log']) / 'launcher.log').read_text(encoding='utf-8', errors='replace')
+                        self.state['error'] = plain_text((io_path(value['log']) / 'launcher.log').read_text(encoding='utf-8', errors='replace'))
                     except OSError:
                         self.state['error'] = value.get('output') or self.state.get('tail', '')
                 if value['action'] == 'plan' and value['status'] in ('complete', 'failed'):
@@ -410,7 +417,7 @@ class Setup:
                         self.bind(value['root'])
                         self.state['ready'] = True
                     except (OSError, ValueError) as error:
-                        self.state.update(status='failed', error=str(error))
+                        self.state.update(status='failed', error=plain_text(error))
         return dict(self.state, **self.events.snapshot(), busy=self.runner.busy)
 
 

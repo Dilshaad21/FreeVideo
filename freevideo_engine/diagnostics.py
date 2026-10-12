@@ -16,6 +16,8 @@ import time
 import zipfile
 import platform
 
+from . import execution_paths
+from .long_paths import io_path, resolved, plain, plain_text
 from . import __version__
 from .bootstrap import DEFAULT_ROOT
 from .system import windows, venv_python, system_memory, nvidia_smi, bootstrap_root
@@ -72,7 +74,7 @@ class Redactor:
         return value
 
     def text(self, value):
-        value = str(value)
+        value = plain_text(value)
         for prompt in sorted(self.prompts, key=len, reverse=True):
             value = value.replace(prompt, '<PROMPT REMOVED>')
         for secret in sorted(self.secrets, key=len, reverse=True):
@@ -146,6 +148,7 @@ class Redactor:
 
 
 def read_bounded(path, limit=FILE_LIMIT):
+    path = io_path(path)
     if windows():
         from .win32 import open_regular
         descriptor = open_regular(path)
@@ -165,6 +168,7 @@ def read_bounded(path, limit=FILE_LIMIT):
 
 def read_complete(path):
     """Read one regular diagnostic file in full for an explicit user export."""
+    path = io_path(path)
     if windows():
         from .win32 import open_regular
         descriptor = open_regular(path)
@@ -221,14 +225,14 @@ def web_files(root, machine):
     for source in sources:
         if not isinstance(source, str) or not source:
             continue
-        source = Path(source)
+        source = io_path(source)
         try:
             rows = json.loads((source / 'launcher-source.json').read_text(encoding='utf-8'))['sha256']
             rows = rows if isinstance(rows, dict) else None
         except (OSError, ValueError, KeyError, TypeError):
             rows = None
         if not (source / 'web').is_dir():
-            return dict(source=str(source), error='The web folder is missing')
+            return dict(source=plain(source), error='The web folder is missing')
         present = {p.relative_to(source).as_posix(): p for p in (source / 'web').rglob('*') if p.is_file()}
         expected = {k: v for k, v in (rows or {}).items() if k.startswith('web/')}
         changed = []
@@ -238,14 +242,16 @@ def web_files(root, machine):
                     changed.append(name)
             except OSError:
                 changed.append(name)
-        return dict(source=str(source), manifest=rows is not None, files=len(present),
+        return dict(source=plain(source), manifest=rows is not None, files=len(present),
                     missing=sorted(set(expected) - set(present)), changed=changed,
                     extra=sorted(set(present) - set(expected)) if rows is not None else [])
     return dict(error='No FreeVideo source is recorded')
 
 
 def collect(root, config, run, output, *, complete=False, extra_files=(), notes=''):
-    root, config = root.expanduser().resolve(), config.expanduser().absolute()
+    root, config = resolved(root.expanduser()), io_path(config.expanduser().absolute())
+    run = io_path(run) if run is not None else None
+    output = io_path(output)
     if run is not None and (not run.is_dir() or is_link(run)):
         raise ValueError('--run must be a real report directory')
     if output.suffix.lower() != '.zip':
@@ -255,8 +261,8 @@ def collect(root, config, run, output, *, complete=False, extra_files=(), notes=
     setup = latest(root, 'setup-runs')
     selected = run.resolve() if run else latest(root, 'test-runs')
     optimized = latest(root, 'optimization-runs')
-    redactor = Redactor([(Path.home(), '<HOME>'), (root, '<INSTALL>'),
-                         *((p, '<' + label.upper() + '>') for label, p in [('setup', setup), ('run', selected), ('optimization', optimized)] if p)])
+    redactor = Redactor([(Path.home(), '<HOME>'), (plain(root), '<INSTALL>'),
+                         *((plain(p), '<' + label.upper() + '>') for label, p in [('setup', setup), ('run', selected), ('optimization', optimized)] if p)])
     manifest = {'schema_version': 1, 'engine_version': __version__, 'created_epoch': time.time(),
                 'files': [], 'omitted': [], 'errors': [], 'payload_bytes': 0,
                 'scope': ('Complete eligible local diagnostics. ' if complete else 'Local bounded diagnostics. ') +
@@ -337,10 +343,10 @@ def collect(root, config, run, output, *, complete=False, extra_files=(), notes=
                        if (p := venv_python(root / 'envs' / name)).is_file())
         code = 'import importlib.metadata as m,json,sys; print(json.dumps({"python":sys.version,"packages":{d.metadata["Name"]:d.version for d in m.distributions()}}))'
         for index, python in enumerate(sorted(pythons)):
-            commands.append(('packages-' + str(index), [python, '-B', '-c', code]))
+            commands.append(('packages-' + str(index), [plain(python), '-B', '-c', code]))
         for name, command in commands:
             try:
-                result = subprocess.run(command, capture_output=True, text=True, timeout=15, encoding='utf-8', errors='replace')
+                result = execution_paths.run(command, capture_output=True, text=True, timeout=15, encoding='utf-8', errors='replace')
                 value = {'returncode': result.returncode,
                          'stdout': result.stdout if complete else result.stdout[-FILE_LIMIT:],
                          'stderr': result.stderr if complete else result.stderr[-FILE_LIMIT:]}
@@ -350,19 +356,19 @@ def collect(root, config, run, output, *, complete=False, extra_files=(), notes=
                 value = {'error': str(error)}
                 manifest['errors'].append({'command': name, 'error': redactor.text(str(error))})
             add('current/' + name + '.json', json.dumps(value).encode())
-        bootstrap = bootstrap_root(root)
+        bootstrap = io_path(bootstrap_root(root))
         if not is_link(bootstrap) and (bootstrap / 'bootstrap.log').is_file():
             add_path('bootstrap/bootstrap.log', bootstrap / 'bootstrap.log')
         if windows():
             from .curl_windows import inspect as inspect_curl
             add_path('bootstrap/curl-diagnostic.json', bootstrap / 'curl-diagnostic.json')
             try:
-                curl_state = inspect_curl(dict(os.environ, FREEVIDEO_HOME=str(root)))
+                curl_state = inspect_curl(dict(os.environ, FREEVIDEO_HOME=plain(root)))
             except (OSError, ValueError, RuntimeError) as error:
                 curl_state = dict(status='CURL_DIAGNOSTIC_FAILED', exception=type(error).__name__)
             add('current/curl.json', json.dumps(curl_state).encode())
             from .desktop_runtime import launcher_root
-            gui_runs = launcher_root() / 'runs'
+            gui_runs = io_path(launcher_root()) / 'runs'
             if gui_runs.is_dir() and not is_link(gui_runs):
                 recent = sorted((p for p in gui_runs.iterdir() if p.is_dir() and not is_link(p)), key=lambda p: p.name)[-3:]
                 for gui_run in recent:
@@ -374,7 +380,7 @@ def collect(root, config, run, output, *, complete=False, extra_files=(), notes=
                     'memory': system_memory(), 'cpu': platform.processor(),
                     'executables': {name: shutil.which(name) for name in ('git', 'curl', 'cl', 'nvcc')},
                     'cuda_paths': {k: v for k, v in os.environ.items() if k == 'CUDA_PATH' or k.startswith('CUDA_PATH_V')},
-                    'bootstrap_log': str(bootstrap / 'bootstrap.log')}).encode())
+                    'bootstrap_log': plain(bootstrap / 'bootstrap.log')}).encode())
             except OSError as error:
                 manifest['errors'].append({'command': 'windows-memory', 'error': redactor.text(str(error))})
         else:
@@ -401,8 +407,8 @@ def collect(root, config, run, output, *, complete=False, extra_files=(), notes=
             if (root / 'logs' / name).is_file():
                 add_path('logs/' + name, root / 'logs' / name)
         add('source/web-files.json', json.dumps(web_files(root, machine)).encode())
-        add_path('source/dependencies.json', Path(__file__).with_name('dependencies.json'))
-        source = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(Path(__file__).parent.glob('*.py'))}
+        add_path('source/dependencies.json', io_path(__file__).with_name('dependencies.json'))
+        source = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(io_path(__file__).parent.glob('*.py'))}
         add('source/hashes.json', json.dumps(source).encode())
         # Read structured reports first so their secrets are also redacted
         # when they occur in a launcher's plain-text error or log.
@@ -414,7 +420,7 @@ def collect(root, config, run, output, *, complete=False, extra_files=(), notes=
             add_path('launcher/selected-%d.log' % index, Path(path))
         disk = shutil.disk_usage(output.parent)
         add('current/collector.json', json.dumps({'python': sys.version, 'disk_free_bytes': disk.free,
-                                                'selected_run': str(selected) if selected else None}).encode())
+                                                'selected_run': plain(selected) if selected else None}).encode())
         archive.writestr('manifest.json', json.dumps(manifest, indent=2))
     return manifest
 

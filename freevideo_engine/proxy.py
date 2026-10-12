@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from urllib import request
+from . import execution_paths
 
 
 PROXY_KEYS = ('http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
@@ -47,7 +48,7 @@ def git_proxy_keys(env):
     if not shutil.which('git', path=env.get('PATH')):
         return []
     try:
-        result = subprocess.run(['git', 'config', '--null', '--name-only', '--get-regexp', GIT_PROXY_PATTERN],
+        result = execution_paths.run(['git', 'config', '--null', '--name-only', '--get-regexp', GIT_PROXY_PATTERN],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3)
         return list(dict.fromkeys(k for k in result.stdout.decode('utf-8', errors='replace').split('\0')
                                  if k and '\n' not in k and '\r' not in k)) if result.returncode == 0 else []

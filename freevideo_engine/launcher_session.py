@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from .long_paths import io_path, resolved, plain, plain_text, plain_data
 import sys
 import threading
 import time
@@ -138,7 +139,7 @@ class Session:
             except OSError:
                 self.bridge = None
         if self.form['environment_method'] == 'manual' and self.form['offline_runtime'] and not controller:
-            root = Path(self.form['offline_runtime'])
+            root = io_path(self.form['offline_runtime'])
             if (root / 'portable.json').is_file():
                 self.activate_offline(root)
         self.inspect_compatibility()
@@ -148,12 +149,20 @@ class Session:
 
     def engine_root(self):
         if self.form['engine'].strip():
-            return Path(self.form['engine']).expanduser().resolve()
+            return Path(plain(resolved(Path(self.form['engine']).expanduser())))
         if self.form['new_comfy']:
-            return Path(self.form['destination']).expanduser().resolve() / 'FreeVideo-engine'
+            return Path(plain(resolved(Path(self.form['destination']).expanduser()))) / 'FreeVideo-engine'
         if self.form['comfy'].strip():
             return Path(layout(self.form['comfy'])['root']) / 'FreeVideo-engine'
         raise ValueError(self.t('Choose your installation folder first.', '请先选择安装位置。'))
+
+    def installation_engine(self):
+        """The engine folder of the installation in use; None before one is chosen."""
+        selected = self.selected or self.controller.selection or {}
+        engine = selected.get('engine')
+        if engine is None and getattr(self.controller, 'fixed_environment', False) is True:
+            engine = self.controller.root / 'engine'
+        return engine
 
     def persist(self):
         self.store.write(self.form, self.language, self.selected, self.saved_setup)
@@ -222,14 +231,14 @@ class Session:
     def add_folder(self, folder):
         from .local_models import library_roots
         # Saved folders that were deleted since are dropped instead of blocking the new one.
-        kept = [p for p in self.form['model_dirs'] if Path(p).expanduser().is_dir()]
+        kept = [p for p in self.form['model_dirs'] if io_path(Path(p).expanduser()).is_dir()]
         self.edit('model_dirs', library_roots(kept + [folder]))
 
     def remove_folder(self, index):
         removed = self.form['model_dirs'][index]
         self.edit('model_dirs', [p for i, p in enumerate(self.form['model_dirs']) if i != index])
         self.edit('offline_models', [p for p in self.form['offline_models']
-                                    if Path(p) / 'models' != Path(removed)])
+                                    if io_path(p) / 'models' != io_path(removed)])
 
     def clear_runtime(self):
         # Detach it from this plan; imported files remain available for reuse.
@@ -244,7 +253,7 @@ class Session:
         if not paths:
             return
         self.repair_request = None
-        destination = (Path(self.form['destination']).expanduser().resolve() if self.form['new_comfy']
+        destination = (Path(plain(resolved(Path(self.form['destination']).expanduser()))) if self.form['new_comfy']
                        else self.engine_root().parent)
         self.importer.start(paths, destination)
         self.import_retry = ('import', list(paths), destination)
@@ -266,12 +275,13 @@ class Session:
         from .offline_packages import check_runtime_platform
         check_runtime_platform()
         from .portable_launcher import PortableController
+        root = Path(plain(root))
         controller = PortableController(root, bundled=self.source)
         controller.restore({'url': self.form['url']})
         self.controller.close()
         self.repair_request = None
         self.controller = controller
-        self.form['offline_runtime'] = str(root)
+        self.form['offline_runtime'] = plain(root)
         self.remember(controller.selection)
         self.page = 'launcher'
         self.persist()
@@ -384,7 +394,7 @@ class Session:
         if self.page == 'launcher':
             self.repair_request = None
         if self.page == 'launcher' and getattr(self.controller, 'fixed_environment', False) is True:
-            consent = self.controller.root / 'engine/portable-consent.json'
+            consent = io_path(self.controller.root) / 'engine/portable-consent.json'
             if not consent.exists():
                 if not accepted:
                     raise ValueError(self.t('Accept the installation plan and licenses.', '请先同意安装计划及许可证。'))
@@ -625,11 +635,11 @@ class Session:
         from .compatibility import check_installation
         try:
             root = self.engine_root()
-            if (root / 'machine.json').is_file():
+            if (io_path(root) / 'machine.json').is_file():
                 self.compatibility = check_installation(root)
                 if self.compatibility.get('notice'):
-                    self.notice = self.t('Compatibility settings were enabled after an interrupted generation. You can change them in Settings.',
-                                        '上次生成中断后已开启兼容性设置，可在设置中调整或关闭。')
+                    from .compatibility_copy import notice_text
+                    self.notice = notice_text(self.compatibility, self.language.startswith('zh'))
         except (OSError, ValueError, RuntimeError):
             self.compatibility = dict(available=False, level=0, automatic=False)
 
@@ -638,6 +648,11 @@ class Session:
         root = self.engine_root()
         Store(root).set(installed_identity(root), level, automatic)
         self.inspect_compatibility()
+
+    def set_compatibility_level(self, level):
+        # Only moving the slider to Off clears automatic activation. The
+        # independent switch can still enable it again while the level is 0.
+        self.set_compatibility(level, False if level == 0 else self.compatibility['automatic'])
 
     def dismiss_notice(self):
         from .compatibility import Store, installed_identity
@@ -651,9 +666,28 @@ class Session:
         from .failure_details import redacted_launcher_error
         if self.tail.path is None:
             return self.tail.text
-        raw, _ = read_complete(self.tail.path)
-        return redacted_launcher_error(raw.decode('utf-8-sig', errors='replace'),
+        raw, _ = read_complete(io_path(self.tail.path))
+        return redacted_launcher_error(plain_text(raw.decode('utf-8-sig', errors='replace')),
                                        [(self.token, '<REDACTED>')] if self.token else [])
+
+    def _raw_error(self):
+        row = self.controller.state
+        errors = [self.error, self.browser_error, self.page_error, row.get('error', ''), *row.get('errors', [])]
+        shortcut = row.get('shortcut') or {}
+        if shortcut.get('status') == 'failed':
+            errors.append(shortcut.get('error_zh' if self.language.startswith('zh') else 'error') or shortcut.get('error', ''))
+        return plain_text('\n'.join(str(e) for e in errors if e))
+
+    def diagnostic_error(self):
+        """Full retained causes, including alias failures shown in storage settings."""
+        from .failure_details import redacted_launcher_error
+        from .offline_errors import alias_failure
+        raw = self._raw_error()
+        for state in (self.cleaner.state, self.importer.state, self.upgrade.state):
+            value = state.get('error') or ''
+            if alias_failure(value) and value not in raw:
+                raw += ('\n' if raw else '') + value
+        return redacted_launcher_error(raw, [(self.token, '<REDACTED>')] if self.token else [])
 
     def export_report(self, output):
         if self.report['status'] == 'running':
@@ -662,7 +696,7 @@ class Session:
         root = self.engine_root()
         # Capture the failure and selected logs before another action changes
         # the screen. Collection does not need a working Python/GPU runtime.
-        notes = self.snapshot()['error']
+        notes = self.diagnostic_error()
         logs = tuple(path for _, path in self.controller.terminal_sources())
         replacements = [(self.token, '<REDACTED>')] if self.token else []
         self.report = dict(status='running', path=str(output), error='')
@@ -799,7 +833,7 @@ class Session:
 
     def _installation_ready(self):
         try:
-            return json.loads((self.engine_root() / 'machine.json').read_text(encoding='utf-8')).get('ready') is True
+            return json.loads((io_path(self.engine_root()) / 'machine.json').read_text(encoding='utf-8')).get('ready') is True
         except (OSError, ValueError, AttributeError):
             return False
 
@@ -941,7 +975,7 @@ class Session:
         if self.installed_versions is None:
             self.installed_versions = {}
         if str(source) not in self.installed_versions:
-            package = Path(source) / 'freevideo_engine'
+            package = io_path(source) / 'freevideo_engine'
             try:
                 identity = json.loads((package / 'build-identity.json').read_text(encoding='utf-8'))
                 stamp = str(identity['version']), int(identity['built_at'])
@@ -962,10 +996,10 @@ class Session:
         if not source:
             return (None, {})
         try:
-            changed = (Path(source) / 'freevideo_engine' / 'build-identity.json').stat().st_mtime_ns
+            changed = (io_path(source) / 'freevideo_engine' / 'build-identity.json').stat().st_mtime_ns
         except OSError:
             changed = None
-        key = (str(source), changed)
+        key = (plain(source), changed)
         if cached is not None and cached[0] == key:
             return cached
         from .desktop_runtime import source_release
@@ -980,7 +1014,7 @@ class Session:
         """The product version of the engine the selected installation runs, if it says."""
         source = (self.selected or {}).get('source')
         try:
-            value = json.loads((Path(source) / 'freevideo_engine/release_notes.json').read_text(encoding='utf-8'))
+            value = json.loads((io_path(source) / 'freevideo_engine/release_notes.json').read_text(encoding='utf-8'))
         except (OSError, ValueError, TypeError):
             return None
         return value.get('product_version') if isinstance(value, dict) else None
@@ -1201,7 +1235,7 @@ class Session:
             return None
         def identity(path):
             try:
-                info = os.stat(path)
+                info = os.stat(io_path(path))
                 return path, info.st_size, info.st_mtime_ns
             except OSError:
                 return path, None, None
@@ -1263,7 +1297,7 @@ class Session:
                 for value in rows or [MODEL]]
 
     def snapshot(self):
-        from .failure_details import REPAIR_KINDS, launcher_failure, redacted_launcher_error
+        from .failure_details import REPAIR_KINDS, launcher_failure, redacted_launcher_error, display_launcher_error
         from .launcher_copy import display, progress_view, source_name
         zh = self.language.startswith('zh')
         row = self.controller.state
@@ -1286,11 +1320,8 @@ class Session:
                 if state.get('detail'):
                     label += ' · ' + display(state['detail'], zh)
             overall = dict(label=label, done=state.get('done'), total=state.get('total'))
-        errors = [self.error, self.browser_error, self.page_error, row.get('error', ''), *row.get('errors', [])]
         shortcut = row.get('shortcut') or {}
-        if shortcut.get('status') == 'failed':
-            errors.append(shortcut.get('error_zh' if zh else 'error') or shortcut.get('error', ''))
-        raw_error = '\n'.join(str(e) for e in errors if e)
+        raw_error = self._raw_error()
         error = redacted_launcher_error(raw_error,
                                         [(self.token, '<REDACTED>')] if self.token else [])
         by_id = {r['id']: r for r in self.model_groups}
@@ -1382,6 +1413,12 @@ class Session:
                 if line.startswith(MISMATCH_PATH + ': ') and line[len(MISMATCH_PATH) + 2:]:
                     failure['path'] = line[len(MISMATCH_PATH) + 2:]
                     break
+        reasons = self.importer.state.get('write_reasons') or []
+        if (self.importer.state.get('status') == 'error' and reasons
+                and self.error == self.importer.state.get('error') and failure.get('kind') != 'runtime-alias'):
+            from .offline_errors import guidance
+            failure = dict(title=guidance('title', zh),
+                           detail=guidance(reasons[0], zh), action='', kind='offline-write')
         disk = self.disk_view(row, failure)
         if disk and str(failure.get('kind', '')).startswith('disk'):
             failure = launcher_failure(error, zh=self.language.startswith('zh'),
@@ -1394,14 +1431,21 @@ class Session:
         repair_offered = bool(error) and self.can_repair() and failure.get('kind') in REPAIR_KINDS
         update = dict(update, remind=update['remind'] and not error,
                       with_repair=repair_offered and bool(update.get('engine')))
-        return dict(sampling_cache_bytes=total_bytes(), version=__version__,
+        cleanup = dict(self.cleaner.state, busy=self.cleaner.busy)
+        from .offline_errors import alias_failure
+        if alias_failure(cleanup.get('error', '')):
+            cleanup['error'] = display_launcher_error(cleanup['error'], zh=zh)
+        model_upgrade = dict(self.upgrade.state, busy=self.upgrade.busy)
+        if alias_failure(model_upgrade.get('error', '')):
+            model_upgrade['error'] = display_launcher_error(model_upgrade['error'], zh=zh)
+        return plain_data(dict(sampling_cache_bytes=total_bytes(), version=__version__,
             disk=disk, decimal_sizes=sys.platform == 'darwin', zh=self.language.startswith('zh'), form=dict(self.form),
             page=self.page, status=row.get('status', 'idle'), busy=self.controller.busy or self.importer.busy or self.cleaner.busy,
-            cleanup=dict(self.cleaner.state, busy=self.cleaner.busy),
+            cleanup=cleanup,
             can_cleanup=not (self.controller.busy or self.importer.busy or self.cleaner.busy or self.closing
                 or self.update_intent or self.engine_updating or self.updater and self.updater.busy
                 or self.upgrade.active or self.model_switch),
-            model_upgrade=dict(self.upgrade.state, busy=self.upgrade.busy, switching=bool(self.model_switch)),
+            model_upgrade=dict(model_upgrade, switching=bool(self.model_switch)),
             offline=dict(progress_view(self.importer.state, zh), runtime=bool(self.form['offline_runtime']),
                 runtime_supported=runtime_packages_supported(),
                 models=len(self.form['offline_models']), guide=package_instructions(self.form['new_comfy'] and self.form['environment_method'] == 'manual'
@@ -1429,7 +1473,7 @@ class Session:
             review_id=row.get('plan', {}).get('plan_id', ''),
             consent=self.t('I accept the installation plan and model / toolkit licenses.', '我同意安装计划及模型／工具包许可证。'),
             licenses=self.licenses(row), portable=False, needs_consent=bool(getattr(self.controller, 'fixed_environment', False) is True
-                and not (self.controller.root / 'engine/portable-consent.json').exists()),
+                and not (io_path(self.controller.root) / 'engine/portable-consent.json').exists()),
             review=dict(engine=str(row.get('selection', {}).get('engine', self.form['engine'])),
                         replace_models=replace_models,
-                        comfy=str(row.get('selection', {}).get('root', self.form['comfy']))))
+                        comfy=str(row.get('selection', {}).get('root', self.form['comfy'])))))

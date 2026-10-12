@@ -289,6 +289,8 @@ class ResourceHistory:
 
     def _recover(self, db):
         recovered=[]
+        # Requests found unsettled together were cut short by the same event.
+        batch=uuid.uuid4().hex
         for row in db.execute("SELECT * FROM attempts WHERE state='pending'").fetchall():
             if process_state(json.loads(row['owner_json'])) != 'dead':
                 continue
@@ -303,7 +305,7 @@ class ResourceHistory:
                            (time.time(), _json(details), row['id']))
                 continue
             from .compatibility import Store
-            Store(self.path.parent).incident(record, 'unfinished_request_after_owner_and_worker_exit')
+            Store(self.path.parent).incident(record, 'unfinished_request_after_owner_and_worker_exit', batch=batch)
             db.execute('DELETE FROM attempts WHERE id=?',(row['id'],))
         return recovered
 
@@ -407,6 +409,17 @@ class ResourceHistory:
             observed = self._observation(observation, row)
             merged = json.loads(row['details_json'])
             merged.update(details or {})
+            if outcome == 'success':
+                from .compatibility import Store
+                try:
+                    compatibility = Store(self.path.parent).success(self._row(row))
+                    if compatibility is not None:
+                        merged['compatibility'] = compatibility
+                except Exception as error:
+                    # Optional compatibility bookkeeping, whatever is wrong with its
+                    # stored state, cannot lose a completed video or turn its settlement
+                    # into another failed attempt.
+                    merged['compatibility_error'] = repr(error)
             db.execute('UPDATE attempts SET state=?,settled=?,details_json=?,observation_json=? WHERE id=?',
                        (outcome, time.time(), _json(merged), observed, attempt_id))
             return self._row(db.execute('SELECT * FROM attempts WHERE id=?', (attempt_id,)).fetchone())

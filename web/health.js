@@ -13,10 +13,10 @@ const t = (en, zh) => cn ? zh : en;
 // launcher.js removes this flag during setup; read it before that.
 const launchVisit = query.get('freevideo') === 'launch';
 // Every script this folder ships; a test keeps the list in step with web/*.js.
-export const MODULES = ['browser_extension.js', 'compatibility.js', 'error_panel.js', 'fonts.js', 'freevideo.js', 'generation_progress.js',
+export const MODULES = ['browser_extension.js', 'capability_view.js', 'compatibility.js', 'error_panel.js', 'fonts.js', 'freevideo.js', 'generation_progress.js',
     'health.js', 'image_editor.js', 'image_editor_engine.js', 'launcher.js', 'library.js', 'motion.js', 'output_download.js', 'port_notice.js', 'preview_scene.js',
     'progress_connection.js', 'prompt_draft.js', 'prompt_enhance.js', 'prompt_references.js', 'report_issue.js', 'studio_recent.js',
-    'result_actions.js', 'sampling_effort.js', 'setup.js', 'share.js', 'studio.js', 'studio_queue.js',
+    'result_actions.js', 'sampling_effort.js', 'setup.js', 'share.js', 'studio.js', 'studio_queue.js', 'studio_size.js',
     'toolbar_position.js', 'updates.js', 'view_navigation.js', 'wordmark.js'];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 // A file the browser failed to load stays failed for the page's lifetime even

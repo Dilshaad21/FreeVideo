@@ -2,20 +2,22 @@
 import json
 from pathlib import Path
 
+from .long_paths import io_path, resolved, plain_data, plain_errors
 from . import diagnostic_resources as d
 
 
+@plain_errors
 def _json(path, limit=2*1024*1024):
-    with path.open('rb') as stream:
+    with io_path(path).open('rb') as stream:
         raw = stream.read(limit+1)
-    return d.mapping(json.loads(raw)) if len(raw) <= limit else {}
+    return plain_data(d.mapping(json.loads(raw))) if len(raw) <= limit else {}
 
 
 def collect(root, since):
     """Never pick a different/old installation merely because it is the latest."""
     try:
-        root = Path(root).resolve()
-        run = Path(_json(root/'machine.json')['setup_run']).resolve()
+        root = resolved(root)
+        run = resolved(_json(root/'machine.json')['setup_run'])
         if run.parent != (root/'setup-runs').resolve() or (run/'plan.json').stat().st_mtime < since-1:
             return {}
         state = _json(run/'status.json')
@@ -59,7 +61,7 @@ def collect(root, since):
                             ('source', 'route', 'error_type', 'returncode', 'summary') if key in item})
                 except OSError:
                     continue
-        return dict(state=state, samples=rows, package_attempts=package_attempts[-16:])
+        return plain_data(dict(state=state, samples=rows, package_attempts=package_attempts[-16:]))
     except (OSError, ValueError, KeyError, TypeError):
         return {}
 

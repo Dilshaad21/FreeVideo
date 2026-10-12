@@ -9,14 +9,16 @@ from functools import lru_cache
 from pathlib import Path
 import time
 from . import disk_space
+from .long_paths import io_path, plain_errors
 
 COMMUNITY_PREFIX = 'community-sigma3-'
 WORKERS = 6
 
 
+@plain_errors
 def tables():
     from .prepared_model import CATALOG
-    catalog = json.loads(CATALOG.read_text(encoding='utf-8'))
+    catalog = json.loads(io_path(CATALOG).read_text(encoding='utf-8'))
     banks = catalog.get('optional_adaln_sets', []) + [catalog.get('optional_adaln', {})]
     seen, result = set(), []
     for bank in banks:
@@ -67,7 +69,7 @@ def usable_with(cache):
     """Published tables match prepared weights; a locally converted cache may not."""
     from . import adaln_assets as assets
     try:
-        manifest = json.loads((Path(cache) / 'manifest.json').read_text(encoding='utf-8'))
+        manifest = json.loads((io_path(cache) / 'manifest.json').read_text(encoding='utf-8'))
         weights = assets.weight_identity(manifest)
     except (OSError, ValueError, KeyError, TypeError):
         return False
@@ -78,7 +80,7 @@ def installed(machine):
     """Every quality level is on disk, or none applies to these weights."""
     if not usable_with(machine['cache']):
         return True
-    folders = (cache_root(machine['model_root']), Path(machine['cache']))
+    folders = (io_path(cache_root(machine['model_root'])), io_path(machine['cache']))
     def present(row):
         return any((folder / row['sampling_file']).is_file()
                    and (folder / row['sampling_file']).stat().st_size == row['bytes'] for folder in folders)

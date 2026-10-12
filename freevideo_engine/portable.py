@@ -10,6 +10,8 @@ import time
 import traceback
 
 from .monitoring import save
+from .long_paths import io_path, resolved, plain, plain_data, plain_text
+from .runtime_alias import checked_real_path
 
 
 @contextmanager
@@ -44,14 +46,14 @@ def bundle_name(name):
 
 def inside(root, name):
     bundle_name(name)
-    root = Path(root).resolve()
+    root = resolved(root)
     path = root / name
     if any(p.is_symlink() or (hasattr(p, 'is_junction') and p.is_junction())
            for p in [path, *path.parents] if p != root and root in p.parents):
         raise ValueError('Bundle files must not redirect outside their directory: ' + name)
-    if root not in path.resolve().parents:
+    if root not in resolved(path).parents:
         raise ValueError('Bundle path escapes its directory: ' + name)
-    return path
+    return Path(plain(path))
 
 
 def listing(root):
@@ -61,7 +63,7 @@ def listing(root):
     each of ~58,000 files (for stat or its NTFS change time) took minutes under
     real-time scanning. Links are refused.
     """
-    root = os.path.join(str(root), '')
+    root = os.path.join(str(resolved(checked_real_path(root))), '')
     found, pending = {}, [root]
     while pending:
         current = pending.pop()
@@ -72,7 +74,7 @@ def listing(root):
         with entries:
             for entry in entries:
                 if entry.is_symlink() or entry.is_junction():
-                    raise ValueError('Bundle files must not redirect outside their directory: ' + entry.path)
+                    raise ValueError('Bundle files must not redirect outside their directory: ' + plain_text(entry.path))
                 if entry.is_dir(follow_symlinks=False):
                     pending.append(entry.path)
                 elif entry.is_file(follow_symlinks=False):
@@ -82,7 +84,7 @@ def listing(root):
 
 
 def manifest(root):
-    value = json.loads((Path(root) / 'portable.json').read_text(encoding='utf-8'))
+    value = json.loads((io_path(root) / 'portable.json').read_text(encoding='utf-8'))
     if value.get('schema_version') != 1 or value.get('variant') not in ('rowwise', 'per_tensor', 'int8_convrot'):
         raise ValueError('Invalid FreeVideo portable bundle')
     seen = set()
@@ -102,7 +104,7 @@ def manifest(root):
 def verify(root, value, progress=lambda **kw: None):
     """Hash a file only when it is not as last verified (size, modification time)."""
     from .network import hash_file
-    root = Path(root)
+    root = resolved(checked_real_path(root))
     ledger = root / 'engine' / 'portable-verified.json'
     try:
         prior = json.loads(ledger.read_text(encoding='utf-8'))
@@ -127,7 +129,7 @@ def verify(root, value, progress=lambda **kw: None):
         # Earlier ledgers kept more fields; size, time and digest decide.
         known = isinstance(entry, dict) and all(entry.get(k) == v for k, v in stamp.items())
         if not known or found[1] >= time.time_ns()-10**9:
-            path = inside(root, row['path'])
+            path = io_path(inside(root, row['path']))
             if hash_file(path, discard_cache=True, progress=lambda current, length: report(row['path'], current)) != row['sha256']:
                 raise ValueError('Bundled file failed verification: ' + row['path'])
             info = path.stat()
@@ -142,27 +144,38 @@ def verify(root, value, progress=lambda **kw: None):
 
 def environment(root, value, environ=None):
     from .comfy_environment import isolated_environment
-    root = Path(root).resolve()
-    env = isolated_environment(root/'engine', inside(root, value['source']), environ)
-    env.update(FREEVIDEO_MODEL_ROOT=str(inside(root, value['model_root'])),
-               FREEVIDEO_VDN_ROOT=str(inside(root, value['vdn'])),
-               FREEVIDEO_COMFY_ROOT=str(inside(root, value.get('encoder_library') or value['comfy'])),
-               TORCHINDUCTOR_CACHE_DIR=str(root/'engine/cache/inductor'),
-               TRITON_CACHE_DIR=str(root/'engine/cache/triton'),
-               HF_HOME=str(root/'engine/cache/huggingface'),
+    root = resolved(root)
+    env = isolated_environment(Path(plain(root/'engine')), Path(plain(inside(root, value['source']))), environ)
+    env.update(FREEVIDEO_MODEL_ROOT=plain(inside(root, value['model_root'])),
+               FREEVIDEO_VDN_ROOT=plain(inside(root, value['vdn'])),
+               FREEVIDEO_COMFY_ROOT=plain(inside(root, value.get('encoder_library') or value['comfy'])),
+               TORCHINDUCTOR_CACHE_DIR=plain(root/'engine/cache/inductor'),
+               TRITON_CACHE_DIR=plain(root/'engine/cache/triton'),
+               HF_HOME=plain(root/'engine/cache/huggingface'),
                HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1')
     # Bundled Python/Triton provide their DLLs and compiler. An unrelated CUDA
     # installation or build compiler must not override this sealed runtime.
     for key in ('PYTHONHOME', 'CUDA_HOME', 'CUDA_PATH', 'CC', 'CXX'):
         env.pop(key, None)
     python = inside(root, value['python']).parent
-    env['PATH'] = os.pathsep.join([str(python), str(python/'Scripts'), str(python/'Lib/site-packages/bin'), env.get('PATH', '')])
+    env['PATH'] = os.pathsep.join([plain(python), plain(python/'Scripts'), plain(python/'Lib/site-packages/bin'), env.get('PATH', '')])
     from .triton_compat import environment as compiler_environment
-    return compiler_environment(root/'engine', env)
+    return compiler_environment(Path(plain(root/'engine')), env)
+
+
+def own_environment(root, value):
+    """environment() for the process that sets it on itself.
+
+    A process started from the runtime's short folder (launch_view) names the
+    runtime through that folder, as the environment it was started with did:
+    what it starts with the inherited environment imports and loads from there.
+    """
+    from .execution_paths import execution_environment
+    return execution_environment(environment(root, value))
 
 
 def configuration(root, value, hardware):
-    root = Path(root).resolve()
+    root = resolved(root)
     from .prepared_model import preferred_format
     # The GPU's own FP8 granularity, and int8 where it is the faster format.
     allowed = {'per_tensor' if hardware.capability[0] >= 10 else 'rowwise'}
@@ -172,13 +185,13 @@ def configuration(root, value, hardware):
         raise ValueError('This GPU needs the %s bundle; this archive contains %s. No models were downloaded or changed.'
                          % (' or '.join(sorted(allowed)), value['variant']))
     from . import __version__
-    spec = json.loads((Path(__file__).with_name('dependencies.json')).read_text(encoding='utf-8'))
+    spec = json.loads((io_path(__file__).with_name('dependencies.json')).read_text(encoding='utf-8'))
     models = inside(root, value['model_root'])
-    return dict(schema_version=1, root=str(root/'engine'), source=str(inside(root, value['source'])),
+    return plain_data(dict(schema_version=1, root=str(root/'engine'), source=str(inside(root, value['source'])),
         environment_layout='unified', system=hardware.system, engine_version=__version__,
         python=str(inside(root, value['python'])), comfy_python=str(inside(root, value['python'])),
         # The encoder's own copy when assembly made one; the bundled ComfyUI otherwise.
-        comfy_root=str(inside(root, value.get('encoder_library') or value['comfy'])), vdn_root=str(inside(root, value['vdn'])),
+        comfy_root=plain(inside(root, value.get('encoder_library') or value['comfy'])), vdn_root=plain(inside(root, value['vdn'])),
         model_root=str(models), encoder_model_root=str(inside(root, value['encoder_root'])),
         base=str(models/'h3-base'), checkpoint=str(models/'stage-dmd-step-250'),
         cache=str(inside(root, value['cache'])), encoder=spec['models']['encoder_file'].split('/')[-1],
@@ -187,13 +200,18 @@ def configuration(root, value, hardware):
         gpu_uuid=hardware.gpu_uuid, gpu_name=hardware.gpu_name, model_revision=spec['models']['vdn_revision'],
         vram_gib=None, ram_gib=None, ready=False, portable=True,
         portable_revision=value['source_commit'], setup_run=str(root/'engine/portable-runs'),
-        platform_validation='Local kernel checks only; full-video diagnostics remain separate.')
+        platform_validation='Local kernel checks only; full-video diagnostics remain separate.'))
 
 
 def initialize(root, progress=lambda **kw: None):
-    root = Path(root).resolve()
+    root = resolved(root)
     value = manifest(root)
-    os.environ.update(environment(root, value))
+    os.environ.update(own_environment(root, value))
+    from .long_paths import long_paths_unavailable
+    if long_paths_unavailable():
+        # Generating would stop at the first file under the real folder; say so before anything is prepared.
+        from .runtime_alias import AliasUnavailable
+        raise AliasUnavailable('other', OSError('This Windows does not open long paths for the process'))
     from .locking import runtime_lock
     with runtime_lock(root/'engine/engine.lock', inherit=False) as descriptor, child_lease(descriptor):
         verify(root, value, progress)
@@ -209,10 +227,10 @@ def initialize(root, progress=lambda **kw: None):
         from .kernel_capabilities import available_backends, readiness, receipt_path
         available_backends(hardware)
         if machine['prepared_format'] == 'int8_convrot':
-            rows = json.loads(receipt_path().read_text(encoding='utf-8')).get('kernel_probes', [])
+            rows = json.loads(io_path(receipt_path()).read_text(encoding='utf-8')).get('kernel_probes', [])
             if not readiness(rows).get('int8_ready'):
                 raise ValueError('The int8 model needs int8 GPU kernels, and they did not pass on this GPU. '
-                                 'No models were changed. Details: ' + str(receipt_path()))
+                                 'No models were changed. Details: ' + plain(receipt_path()))
         machine['ready'] = True
         save(root/'engine/machine.json', machine)
         save(root/'engine/prepared-cache.json', dict(cache=machine['cache'],
@@ -228,8 +246,8 @@ def connect(root, value, machine, progress=lambda **kw: None, cancelled=None, *,
     previous: the controller of an earlier attempt, whose ComfyUI may still run.
     """
     from .comfy_launcher_runtime import Controller, deploy, node_target
-    comfy = inside(root, value['comfy'])
-    if node_target(comfy).resolve() != Path(machine['source']).resolve():
+    comfy = io_path(inside(root, value['comfy']))
+    if resolved(node_target(comfy)) != resolved(machine['source']):
         # An environment package brings ComfyUI without the FreeVideo node: the
         # launcher source it was imported with backs one, as in any installation.
         deploy(comfy, machine['source'], machine['root'])
@@ -238,7 +256,7 @@ def connect(root, value, machine, progress=lambda **kw: None, cancelled=None, *,
         # A ComfyUI this launcher started for an earlier attempt, e.g. one that
         # came up without FreeVideo: connecting restarts it instead of asking to.
         controller.server, controller.server_log = previous.server, previous.server_log
-    controller.shortcut_root = root
+    controller.shortcut_root = Path(plain(root))
     if not machine['gpu_uuid'].startswith(('GPU-', 'MIG-')):
         raise ValueError('The CUDA device did not provide a valid GPU identity; rerun the GPU check.')
     # CUDA UUIDs survive a Windows display-adapter order change. The host and
@@ -248,7 +266,7 @@ def connect(root, value, machine, progress=lambda **kw: None, cancelled=None, *,
         controller.cancelled = cancelled
         if cancelled.is_set():
             raise RuntimeError('Startup cancelled')
-    controller.selection = dict(ready=True, root=str(comfy), engine=machine['root'],
+    controller.selection = dict(ready=True, root=plain(comfy), engine=machine['root'],
         source=machine['source'], python=machine['python'], url=url,
         portable=False, separate=False)
     controller.restore_terminal(machine['root'])
@@ -274,7 +292,7 @@ def main(root=None, argv=None):
     root = Path(root or Path(sys.argv[0]).resolve().parent)
     if args.smoke:
         value = manifest(root)
-        os.environ.update(environment(root,value))
+        os.environ.update(own_environment(root,value))
         os.environ['CUDA_VISIBLE_DEVICES']=''
         import importlib
         import importlib.metadata

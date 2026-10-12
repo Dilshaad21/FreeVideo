@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 
+from .execution_paths import execution_environment
 from . import processes
 from .monitoring import save
 
@@ -472,8 +473,9 @@ def serve(endpoint, runner, snapshot):
                     try:
                         descriptor = _receive_lease(connection)
                         phase = 'runtime lease validation'
+                        environment = execution_environment(request['environment'])
                         os.environ.clear()
-                        os.environ.update(request['environment'])
+                        os.environ.update(environment)
                         os.environ.pop(processes.HANDLE_ENV, None)
                         os.environ['FREEVIDEO_RUNTIME_LOCK_FD'] = str(descriptor)
                         from .locking import runtime_lock

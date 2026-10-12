@@ -30,6 +30,7 @@ import tempfile
 import threading
 import time
 
+from .execution_paths import execution_environment
 from .monitoring import save
 
 # The node's default request: 1344x768, 10 s, two passes of 8 + 3 steps. The
@@ -303,14 +304,22 @@ def check_kernels(hardware, machine, environment, room):
 
 
 def compile_shapes(machine, shapes, history, identity, receipt, environment, timeout, room):
+    from . import launch_view
     from .locking import LOCK_ENV, runtime_lock
+    from .long_paths import io_path
     root = Path(machine['root'])
-    with runtime_lock() as descriptor, tempfile.TemporaryDirectory(prefix='precompile-', dir=root,
+    view = launch_view.current() or launch_view.for_engine(root)
+    # torch and the worker must see a short path; keep the machine and final
+    # receipt rooted at the real installation. Never resolve the temporary view.
+    work_root = Path(launch_view.value(root, view)) if view.used else root
+    with runtime_lock() as descriptor, tempfile.TemporaryDirectory(prefix='precompile-', dir=work_root,
                                                                    ignore_cleanup_errors=True) as folder:
         environment[LOCK_ENV] = str(descriptor)
         # An interrupted run leaves its folder behind; only this lease writes them.
-        for stale in root.glob('precompile-*'):
-            if (stale.is_dir() and stale != Path(folder)
+        # Found and removed under the real folder: nothing is deleted through a short
+        # folder, which may by now lead somewhere else.
+        for stale in io_path(root).glob('precompile-*'):
+            if (stale.is_dir() and stale.name != Path(folder).name
                     and re.fullmatch(r'precompile-[a-z0-9_]{8}', stale.name)):
                 shutil.rmtree(stale, ignore_errors=True)
         index = 0
@@ -329,6 +338,17 @@ def compile_shapes(machine, shapes, history, identity, receipt, environment, tim
                 index += 1
                 compile_plan(receipt, dict(shape, text_tokens=tuple(tokens)), request, profile, index,
                              Path(folder), environment, descriptor, timeout, room)
+                if view.used:
+                    # Only the temporary execution paths and their diagnostics
+                    # return from the worker; persisted identities stay real.
+                    row = receipt['shapes'][-1]
+                    for name in ('error', 'stderr_tail'):
+                        if name in row:
+                            row[name] = launch_view.text_back(row[name], view)
+                    back = launch_view.View(view.root, view.real, view.rules)
+                    for sample in row.get('worker', {}).get('passes', ()):
+                        if 'conditioning' in sample:
+                            sample['conditioning'] = launch_view.value(sample['conditioning'], back)
     # A stop arriving after the last worker finished finds the work done; the
     # receipt records it, so the next start does not compile it again.
     receipt['success'] = all(row.get('returncode') == 0 for row in receipt['shapes'])
@@ -477,7 +497,7 @@ def main(argv=None):
     try:
         from .testing import environment
         # A request's own variables: the installation, its caches and its GPU.
-        os.environ.update(environment(machine))
+        os.environ.update(execution_environment(environment(machine)))
         owner = os.environ.get(OWNER_ENV)
         receipt = run(machine, background=args.background, owner=int(owner) if owner else None)
     except Exception as error:

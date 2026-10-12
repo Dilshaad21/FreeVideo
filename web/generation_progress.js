@@ -231,13 +231,14 @@ export function createGenerationProgress(t, now = () => Date.now(), {compact = f
     const times = el('div', 'fv-generation-times');
     const elapsed = el('span', ''), eta = el('span', ''); times.append(elapsed, eta);
     const status = el('div', 'fv-generation-status'); status.hidden = true;
+    const compatibilityNote = el('div', 'fv-generation-compatibility'); compatibilityNote.hidden = true;
     const live = el('div', 'fv-generation-live');
     live.setAttribute('aria-live', 'polite'); live.setAttribute('aria-atomic', 'true');
     const stall = el('p', 'fv-generation-note fv-generation-stall'); stall.hidden = true;
     stall.setAttribute('role', 'status');
     const stallText = el('span', ''); stall.append(stallText);
     const trims = new Map();
-    element.append(heading, track, label, mini, times, status, live);
+    element.append(heading, track, label, mini, times, compatibilityNote, status, live);
     let recovery = '', lowMemory = false, compatibility = null, samplingPlan = {}, secondPass = false, references = false;
     let hasHeartbeat = false;
     // Mac: the unified-memory notice of this request, and whether its first pass has ended.
@@ -527,8 +528,23 @@ export function createGenerationProgress(t, now = () => Date.now(), {compact = f
         if (label.textContent !== base) label.textContent = base;
         drawMini(age, ended);
         const firstSlow = state.phase === 'sampling' && state.stage !== 'latent_upscale' && state.done === 0 && paused;
+        const automatic = compatibility?.origin === 'automatic' && compatibility.level > 0;
+        const required = Number.isInteger(compatibility?.recovery_successes_required) && compatibility.recovery_successes_required > 0
+            ? compatibility.recovery_successes_required : 3;
+        const successes = Number.isInteger(compatibility?.consecutive_successes) ? compatibility.consecutive_successes : 0;
+        const remaining = Math.max(0, required - Math.max(0, successes));
+        const compatibilityText = !ended && automatic ? compatibility.recovery_disabled
+            ? t('Generation is slowed automatically for stability; you can change this in Settings.', '为了稳定，生成已自动放慢；可在设置里调整。')
+            : t(remaining === 1 ? 'Generation is slowed automatically for stability; it speeds up after one more successful generation.'
+                : `Generation is slowed automatically for stability; it speeds up after ${remaining} more successful generations.`,
+                `为了稳定，生成已自动放慢；再连续完成 ${remaining} 次后会加快一些。`) : '';
+        if (compatibilityNote.textContent !== compatibilityText) {
+            compatibilityNote.textContent = compatibilityText;
+            compatibilityNote.hidden = !compatibilityText;
+            layout();
+        }
         const level = ended ? '' : recovery ? 'retry' : firstSlow ? 'first-step'
-            : lowMemory ? 'memory' : memoryTight ? 'unified-memory' : compatibility ? 'compatibility' : trims.size ? 'notice' : '';
+            : lowMemory ? 'memory' : memoryTight ? 'unified-memory' : compatibility && !automatic && compatibility.level > 0 ? 'compatibility' : trims.size ? 'notice' : '';
         const explanation = {retry: recovery,
             'first-step': t('The first run at this size, or after an update, takes longer to start.',
                 '首次使用这个尺寸或更新后，开头要多花一些时间。'),
@@ -549,8 +565,9 @@ export function createGenerationProgress(t, now = () => Date.now(), {compact = f
         status.hidden = !explanation; status.dataset.level = level;
         const announcements = [];
         if (paused && !pauseAnnounced) { announcements.push(base); pauseAnnounced = true; }
-        if (explanation !== lastExplanation && explanation && !announcedMessages.has(explanation)) {
-            announcements.push(explanation); announcedMessages.add(explanation);
+        for (const text of [compatibilityText, explanation !== lastExplanation ? explanation : '']) {
+            if (!text || announcedMessages.has(text)) continue;
+            announcements.push(text); announcedMessages.add(text);
             if (announcementRecord) {
                 announcementRecord.messages = [...announcedMessages];
                 try { sessionStorage.setItem(announcementKey, JSON.stringify(Object.fromEntries(requestAnnouncements))); }
@@ -737,6 +754,7 @@ export function createGenerationProgress(t, now = () => Date.now(), {compact = f
     }
     function hide() {
         element.hidden = true; status.hidden = true; recovery = ''; trims.clear(); lowMemory = false; compatibility = null; references = false; hasHeartbeat = false;
+        compatibilityNote.hidden = true; compatibilityNote.textContent = '';
         memoryTight = null; firstPassOver = false;
         elapsedShown = 0;
         if (timer !== null) clearInterval(timer); timer = null; state = {}; overall = {}; shownFraction = null;

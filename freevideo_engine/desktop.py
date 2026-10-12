@@ -10,6 +10,7 @@ import traceback
 import uuid
 import webbrowser
 
+from .long_paths import io_path, resolved, plain, plain_text, plain_errors
 from . import __version__, branding
 from .desktop_runtime import Runner, launcher_root, materialize_source, preflight_json
 from .monitoring import save
@@ -33,7 +34,7 @@ class Desktop:
         self.progress_rows = {}
         self.zh = (locale.getlocale()[0] or '').lower().startswith('zh')
         try:
-            settings = json.loads((launcher_root() / 'settings.json').read_text(encoding='utf-8'))
+            settings = json.loads((io_path(launcher_root()) / 'settings.json').read_text(encoding='utf-8'))
             if not isinstance(settings, dict):
                 settings = {}
         except (OSError, ValueError):
@@ -268,7 +269,7 @@ class Desktop:
 
     def test_page(self, page):
         _, page = self.scrolled(page, 2)
-        self.label(page, 'Find out how your machine performs.', '看看这台机器的实际表现。',
+        self.label(page, 'Measure the actual generation speed.', '测试实际的生成速度。',
                    style='Section.TLabel').pack(anchor='w')
         self.label(page, 'Five requests: first, repeat, new prompt, resolution, duration.',
                    '连续五轮：首次、重复、更换提示词、分辨率、时长。',
@@ -296,10 +297,11 @@ class Desktop:
                                 ('Open launcher logs', '打开启动器日志', self.open_logs)]:
             self.button(page, en, zh, command, managed=en == 'Export diagnostics').pack(anchor='w', pady=6)
 
+    @plain_errors
     def root(self):
         if not self.install_path.get().strip():
             raise ValueError(self.t('Choose an installation folder.', '请选择安装目录。'))
-        return Path(self.install_path.get()).expanduser().resolve()
+        return Path(plain(resolved(Path(self.install_path.get()).expanduser())))
 
     def root_changed(self, *_):
         self.plan = None
@@ -409,7 +411,7 @@ class Desktop:
     def ready_action(self, action, arguments):
         from tkinter import messagebox
         try:
-            machine = json.loads((self.root() / 'machine.json').read_text(encoding='utf-8'))
+            machine = json.loads((io_path(self.root()) / 'machine.json').read_text(encoding='utf-8'))
             ready = machine.get('ready') is True and machine.get('source') == str(self.source)
         except (OSError, ValueError):
             ready = False
@@ -420,6 +422,7 @@ class Desktop:
         self.begin(action, arguments)
         return True
 
+    @plain_errors
     def generate(self):
         from tkinter import messagebox
         prompt = self.prompt.get('1.0', 'end-1c').strip()
@@ -428,8 +431,8 @@ class Desktop:
             return
         run = self.root() / 'outputs' / ('gui-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6])
         # Prompt text stays local and is excluded from the launcher command/log.
-        run.mkdir(parents=True)
-        (run / 'prompt.txt').write_text(prompt, encoding='utf-8')
+        io_path(run).mkdir(parents=True)
+        (io_path(run) / 'prompt.txt').write_text(prompt, encoding='utf-8')
         width, height = self.resolution.get().split(' × ')
         self.ready_action('generate', ['generate', '--prompt-file', str(run / 'prompt.txt'),
             '--width', width, '--height', height, '--seconds', self.duration.get(), '--out', str(run / 'video.mp4')])
@@ -507,23 +510,26 @@ class Desktop:
                 widget.pack(fill='x', pady=(0, branding.space(3)), before=self.consent)
         self.plan_text.pack_configure(pady=(0, branding.space(2)) if self.plan['errors'] else 0)
 
+    @plain_errors
     def open_path(self, path):
         from tkinter import messagebox
-        if path and Path(path).exists():
-            os.startfile(str(path))
+        if path and io_path(path).exists():
+            os.startfile(plain(path))
         else:
             messagebox.showinfo('FreeVideo', self.t('No result yet.', '目前还没有结果。'), parent=self.window)
 
+    @plain_errors
     def open_report(self):
-        reports = sorted((self.root() / 'test-runs').glob('*/report.html'))
-        self.open_path(reports[-1] if reports else None)
+        reports = sorted((io_path(self.root()) / 'test-runs').glob('*/report.html'))
+        self.open_path(Path(plain(reports[-1])) if reports else None)
 
     def open_outputs(self):
         self.open_path(self.root())
 
+    @plain_errors
     def open_video(self):
-        videos = sorted((self.root() / 'outputs').glob('gui-*/video.mp4'))
-        self.open_path(videos[-1] if videos else None)
+        videos = sorted((io_path(self.root()) / 'outputs').glob('gui-*/video.mp4'))
+        self.open_path(Path(plain(videos[-1])) if videos else None)
 
     def open_logs(self):
         self.open_path(self.last_log or launcher_root() / 'runs')
@@ -693,14 +699,15 @@ class Desktop:
         for row in self.progress_rows.values():
             row['bar'].stop()
 
+    @plain_errors
     def callback_error(self, kind, value, trace):
         from tkinter import messagebox
-        detail = ''.join(traceback.format_exception(kind, value, trace))
+        detail = plain_text(''.join(traceback.format_exception(kind, value, trace)))
         self.append_log(detail)
         path = launcher_root() / 'errors' / ('error-' + uuid.uuid4().hex + '.log')
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(detail, encoding='utf-8')
-        messagebox.showerror('FreeVideo', str(value) + '\n' + str(path), parent=self.window)
+        io_path(path.parent).mkdir(parents=True, exist_ok=True)
+        io_path(path).write_text(detail, encoding='utf-8')
+        messagebox.showerror('FreeVideo', plain_text(value) + '\n' + plain(path), parent=self.window)
 
 
 def main():

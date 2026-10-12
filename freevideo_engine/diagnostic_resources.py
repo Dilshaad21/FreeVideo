@@ -1,6 +1,7 @@
 """Bounded diagnostic evidence without tensor imports, paths or exception text."""
 import math
 import re
+import statistics
 import sys
 
 
@@ -439,6 +440,12 @@ def resources(value):
         if isinstance(observed.get('clock_reason_counts'), dict):
             clean['clock_reason_counts'] = numbers(observed['clock_reason_counts'], tuple(Activity.clock_reasons))
         result['gpu'][key] = clean
+    if isinstance(gpu.get('other_programs'), dict):
+        result['gpu']['other_programs'] = numbers(gpu['other_programs'], ('checks', 'shared_checks', 'check_seconds',
+            'share_percent', 'other_mean_percent', 'other_peak_percent', 'own_mean_percent'))
+        for key in ('supported', 'own_reported'):
+            if type(gpu['other_programs'].get(key)) is bool:
+                result['gpu']['other_programs'][key] = gpu['other_programs'][key]
     return result
 
 
@@ -520,6 +527,54 @@ def sampling(value):
     return result
 
 
+def mac_condition(value):
+    """Fixed Mac hardware fields; preserve nulls without arbitrary metadata."""
+    if value is None:
+        return None
+    from .macos_conditions import THERMAL_NAMES, PRESSURE_NAMES, VM_COUNTERS
+    value = mapping(value)
+    thermal, pressure = value.get('thermal_state'), value.get('memory_pressure_level')
+    thermal = thermal if type(thermal) is int and thermal in THERMAL_NAMES else None
+    pressure = pressure if type(pressure) is int and pressure in PRESSURE_NAMES else None
+    result = dict(thermal_state=thermal, thermal_state_name=THERMAL_NAMES.get(thermal),
+        memory_pressure_level=pressure, memory_pressure_name=PRESSURE_NAMES.get(pressure),
+        low_power_mode=value.get('low_power_mode') if type(value.get('low_power_mode')) is bool else None,
+        power_source=value.get('power_source') if value.get('power_source') in ('ac', 'battery') else None)
+    for key in ('swap_used_bytes', *VM_COUNTERS):
+        item = value.get(key)
+        result[key] = item if type(item) is int and item >= 0 else None
+    return result
+
+
+def mac_conditions_summary(passes):
+    """Observed maxima and per-step host timing, with unknowns kept explicit."""
+    result = []
+    for row in passes:
+        if 'conditions' not in row and 'block_seconds' not in row:
+            continue
+        samples = sequence(row.get('conditions'))
+        states = [mapping(sample) for sample in samples]
+        def highest(key):
+            values = [sample[key] for sample in states if type(sample.get(key)) is int]
+            return max(values) if values else None
+        low_power = [sample['low_power_mode'] for sample in states if type(sample.get('low_power_mode')) is bool]
+        timings = []
+        for step, blocks in enumerate(sequence(row.get('block_seconds')), 1):
+            values = [item for item in sequence(blocks) if type(item) in (int, float)]
+            timings.append(dict(step=step, blocks=len(values),
+                median_seconds=statistics.median(values) if values else None,
+                max_seconds=max(values) if values else None))
+        result.append(dict(index=row['index'], highest_thermal_state=highest('thermal_state'),
+            highest_memory_pressure_level=highest('memory_pressure_level'),
+            low_power_mode_seen=any(low_power) if low_power else None,
+            power_sources=sorted({sample['power_source'] for sample in states
+                                  if sample.get('power_source') in ('ac', 'battery')}),
+            swap_used_start_bytes=mapping(samples[0]).get('swap_used_bytes') if samples else None,
+            swap_used_end_bytes=mapping(samples[-1]).get('swap_used_bytes') if samples else None,
+            block_step_statistics=timings))
+    return result
+
+
 def sampling_passes(value):
     """Per-canvas execution evidence with no paths, prompts or tensor values."""
     result = []
@@ -545,6 +600,16 @@ def sampling_passes(value):
             item['schedule_cache'] = numbers(preparation, ('seconds', 'table_cache_hits'))
         item['step_seconds'] = [duration for duration in sequence(row.get('step_seconds'))[:32]
                                 if type(duration) in (int, float) and math.isfinite(duration) and duration >= 0]
+        if row.get('device_backend') == 'mps':
+            from .macos_conditions import BLOCK_SECONDS_SCOPE
+            if 'conditions' in row:
+                item['conditions'] = [mac_condition(sample) for sample in sequence(row['conditions'])[:33]]
+            if 'block_seconds' in row:
+                item['block_seconds'] = [[duration if type(duration) in (int, float)
+                    and math.isfinite(duration) and duration >= 0 else None
+                    for duration in sequence(step)[:50]] for step in sequence(row['block_seconds'])[:32]]
+            if row.get('block_seconds_scope') == BLOCK_SECONDS_SCOPE:
+                item['block_seconds_scope'] = BLOCK_SECONDS_SCOPE
         result.append(item)
     return result
 

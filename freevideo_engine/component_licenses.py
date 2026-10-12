@@ -7,7 +7,9 @@ reads without a connection; a web page otherwise.
 """
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+from .long_paths import io_path, resolved, plain
+
+HERE = Path(plain(resolved(__file__))).parent
 # The full texts of what the Windows runtime package carries, shipped with every launcher, so
 # a runtime package built before them still opens them without a connection.
 TEXTS = HERE / 'licenses/runtime'
@@ -68,7 +70,7 @@ def library_names(paths):
 def file_exists(path):
     """Whether path is a file; False also when it cannot be looked at (a folder the user may not open)."""
     try:
-        return path.is_file()
+        return io_path(path).is_file()
     except OSError:
         return False
 
@@ -81,12 +83,12 @@ def local(value, *paths, title=None):
         if title is None:
             return True
         try:
-            with path.open('rb') as file:
+            with io_path(path).open('rb') as file:
                 return file.read(256).decode('utf-8', 'replace').lstrip('﻿ \r\n').startswith(title)
         except OSError:
             return False
     path = next((Path(p) for p in paths if p and fits(Path(p))), None)
-    return dict(value, link=str(path)) if path else value
+    return dict(value, link=plain(path)) if path else value
 
 
 def text(value):
