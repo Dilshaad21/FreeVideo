@@ -6,7 +6,7 @@
 </div>
 
 <p align="center">
-| <a href="https://github.com/FlashML-org/FreeVideo/releases/latest/download/FreeVideo.exe"><b>Windows 下载</b></a> | <a href="https://github.com/FlashML-org/FreeVideo/releases/latest/download/FreeVideo-Mac-arm64.dmg"><b>macOS 下载</b></a> | <a href="https://github.com/FlashML-org/FreeVideo/releases/latest/download/FreeVideo-Linux-x86_64.AppImage"><b>Linux 下载</b></a> | <a href="https://freevideo-community.pages.dev/#gallery"><b>作品展示</b></a> | <a href="https://discord.gg/MsA277cJzZ"><b>Discord</b></a> | <a href="https://freevideo-community.pages.dev/qq"><b>QQ 群</b></a> | <a href="https://freevideo-community.pages.dev/wechat"><b>微信群</b></a> |
+| <a href="https://github.com/FlashML-org/FreeVideo/releases/latest/download/FreeVideo.exe"><b>Windows</b></a> | <a href="https://github.com/FlashML-org/FreeVideo/releases/latest/download/FreeVideo-Mac-arm64.dmg"><b>macOS</b></a> | <a href="https://github.com/FlashML-org/FreeVideo/releases/latest/download/FreeVideo-Linux-x86_64.AppImage"><b>Linux</b></a> | <a href="docs/zh-CN/community-results.md"><b>社区实测</b></a> | <a href="https://freevideo-community.pages.dev/#gallery"><b>作品展示</b></a> | <a href="https://discord.gg/MsA277cJzZ"><b>Discord</b></a> | <a href="https://freevideo-community.pages.dev/qq"><b>QQ 群</b></a> | <a href="https://freevideo-community.pages.dev/wechat"><b>微信群</b></a> |
 </p>
 
 <p align="center"><a href="README.md">English</a> · 中文</p>
