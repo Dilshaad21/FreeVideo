@@ -196,8 +196,10 @@ def _machine(machine, in_use=None):
     elif (not isinstance(cap, (list, tuple)) or len(cap) != 2
           or any(type(n) is not int for n in cap) or cap[0] < 8 or not 0 <= cap[1] <= 9):
         return None
-    precision = machine.get('prepared_format', 'int8')
-    if precision not in ('int8', 'fp8'):
+    # Setup records the prepared variant (for example 'int8_convrot'); planning takes its family.
+    saved = machine.get('prepared_format', 'int8')
+    precision = next((p for p in ('int8', 'fp8') if isinstance(saved, str) and saved.startswith(p)), None)
+    if precision is None:
         return None
     # Only use an already saved Metal observation, never create a Metal device.
     metal = observed.get('metal_recommended_working_set_bytes')
