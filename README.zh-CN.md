@@ -94,6 +94,7 @@ git clone https://github.com/FlashML-org/FreeVideo.git && cd FreeVideo
 
 - [FreeVideo Adaptive Execution Planner](docs/zh-CN/execution-planning.md)
 - [社区实测](docs/zh-CN/community-results.md)
+- [感谢社区](docs/zh-CN/community-thanks.md)
 
 ### 问题反馈
 
