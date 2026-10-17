@@ -39,8 +39,10 @@ modules to the public upstream main route layout using the compatibility-checked
 integration anchors. Public source integration is not an additional GPU benchmark.
 
 Publication checks passed 29 LoRA orchestration/installer tests, 16 backend tests,
-and 34 replacement tests (the native Windows cleanup test is skipped on macOS).
-The deployed Windows replacement suite passed all 34 tests. The standalone
+and 35 replacement tests (the native Windows cleanup test is skipped on macOS).
+The preceding Windows deployment passed 34 replacement tests. The new staging-ring
+regression test and worker working-directory fix await Windows deployment and
+verification. The standalone
 disk-mapping probe needs torch and is run separately, not through unittest discovery.
 A Linux/Windows GitHub Actions workflow runs the portable suites.
 Real AI character replacement quality and VRAM use on new footage still require

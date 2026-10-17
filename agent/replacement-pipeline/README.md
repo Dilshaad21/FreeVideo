@@ -86,7 +86,10 @@ integration anchors without reapplying this extension.
 
 `replacement_worker.py` holds FreeVideo's existing GPU lock for the entire process. Tracking,
 generation and compositing run sequentially. WanGP uses its failsafe offload
-profile, SDPA, 480p-class working resolution, and 81-frame windows. Actual
+profile 5, SDPA, 480p-class working resolution, and 81-frame windows. The optional
+smart memory pinning ring is disabled: Animate can otherwise reserve about 3.6 GB
+of host RAM for faster transfers. This trades transfer speed for available RAM;
+the video settings and resource guards stay unchanged. Actual
 8 GB VRAM / 16 GB RAM suitability still needs a real input benchmark.
 
 Dependencies retain their upstream licenses: WanGP Community License, Wan
@@ -97,8 +100,8 @@ model license and SAM 2 Apache 2.0. See `provenance.json` for pinned sources.
 `python -m unittest discover -s tests -v` checks idempotency, validation,
 mask-boundary preservation and the real FFV1 encode/decode round trip when
 NumPy, Pillow and imageio-ffmpeg are available. A synthetic compositor test is
-not evidence of a successful AI character replacement. See [the validation record](../../docs/agent-pipelines.md) for deployment and
-end-to-end status. Live machine diagnostics are excluded from this repository.
+not evidence of a successful AI character replacement. Read `verification.json`
+for the actual deployment and end-to-end status.
 
 `prefetch.py --root ENGINE_ROOT` can stage the large weights without loading
 the GPU. Wait for `agent/replacement/prefetch.json` to say `succeeded` before
