@@ -39,7 +39,7 @@ def prepare(config,request):
                 start=Fraction(container.start_time or 0,1_000_000)
                 if abs(float(timestamp-start))>.002:
                     raise ValueError('Normalize video/audio start timestamps before replacement')
-            if any(side.type.name=='DISPLAYMATRIX' for side in frame.side_data) or stream.metadata.get('rotate','0') not in ('0',''):
+            if any(getattr(side,'type',side).name=='DISPLAYMATRIX' for side in frame.side_data) or stream.metadata.get('rotate','0') not in ('0',''):
                 raise ValueError('Normalize source rotation before replacement')
             if previous is not None and abs(float(timestamp-previous-1/rate))>max(.001,float(1/rate)*.03):
                 raise ValueError('Variable frame rate needs normalization before replacement')

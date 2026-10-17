@@ -97,6 +97,17 @@ class CompositorTests(unittest.TestCase):
             self.assertEqual(len(list((target/'source-frames').glob('*.jpg'))),25)
             self.assertEqual(Image.open(target/'originals/000005.png').getpixel((0,0)),(50,30,80))
 
+    def test_prepare_accepts_h264_sei_metadata(self):
+        import runtime
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);frames=root/'frames';frames.mkdir()
+            for i in range(24):Image.new('RGB',(96,64),(40+i,70,90)).save(frames/f'{i:06d}.png')
+            video=root/'source.mp4'
+            composite.command(['-y','-framerate','24','-i',str(frames/'%06d.png'),'-c:v','libx264','-pix_fmt','yuv420p',str(video)])
+            job=root/'job';job.mkdir();runtime.prepare({},dict(folder=str(job),source=str(video)))
+            self.assertEqual(json.loads((job/'media.json').read_text())['frames'],24)
+
     def test_protected_pixels_and_union(self):
         import numpy as np
         source=np.full((64,96,3),37,dtype=np.uint8)
