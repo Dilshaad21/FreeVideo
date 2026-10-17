@@ -30,7 +30,7 @@ modifying it. Require the agent doctor to report ready before submission.
 
 ## Validation record
 
-The deployed Windows implementation passed 32 replacement tests, including native
+The deployed Windows implementation passed 33 replacement tests, including native
 Windows worker-crash descendant cleanup, concurrent state writes, stage checksum
 recovery, download range/truncation checks, idempotent client replay, FFV1 pixel
 preservation, copied audio and odd-dimension preview decoding. Its API 0.2 reported
@@ -39,8 +39,8 @@ modules to the public upstream main route layout using the compatibility-checked
 integration anchors. Public source integration is not an additional GPU benchmark.
 
 Publication checks passed 29 LoRA orchestration/installer tests, 16 backend tests,
-and 32 replacement tests (the native Windows cleanup test is skipped on macOS).
-The deployed Windows replacement suite passed all 32 tests. The standalone
+and 33 replacement tests (the native Windows cleanup test is skipped on macOS).
+The deployed Windows replacement suite passed all 33 tests. The standalone
 disk-mapping probe needs torch and is run separately, not through unittest discovery.
 A Linux/Windows GitHub Actions workflow runs the portable suites.
 Real AI character replacement quality and VRAM use on new footage still require

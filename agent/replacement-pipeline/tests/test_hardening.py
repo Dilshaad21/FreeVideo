@@ -98,6 +98,27 @@ class ServiceRecoveryTests(unittest.TestCase):
         from test_replacement import service_module
         self.module=service_module()
 
+    def test_worker_bootstraps_current_source_outside_server_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp).resolve();source=root/'source';agent=source/'freevideo_engine/agent';agent.mkdir(parents=True)
+            (source/'freevideo_engine/__init__.py').write_text('')
+            (agent/'__init__.py').write_text('')
+            script="import argparse,json,os;from pathlib import Path;p=argparse.ArgumentParser();p.add_argument('--root');p.add_argument('--job');a=p.parse_args();Path(a.root,'bootstrap.json').write_text(json.dumps(dict(source=__file__,lease=os.environ.get('FREEVIDEO_RUNTIME_LOCK_TEST'))))"
+            (agent/'replacement_worker.py').write_text(script)
+            service=self.module.Replacement(root,None);folder=service.home/'runs/r000000000001'
+            support.atomic_json(folder/'job.json',dict(id=folder.name,status='waiting'))
+            children=[];popen=subprocess.Popen
+            def spawn(*args,**kwargs):
+                child=popen(*args,**kwargs);children.append(child);return child
+            with patch.object(self.module,'__file__',str(agent/'replacement.py')),patch.dict(os.environ,dict(PYTHONPATH=str(root/'wrong-source'),FREEVIDEO_RUNTIME_LOCK_TEST='stale')),patch.object(subprocess,'Popen',side_effect=spawn):
+                service.launch(folder)
+            for child in children:self.assertEqual(child.wait(timeout=10),0)
+            deadline=time.monotonic()+10
+            while not (root/'bootstrap.json').exists() and time.monotonic()<deadline:time.sleep(.05)
+            result=support.read_json(root/'bootstrap.json')
+            self.assertEqual(Path(result['source']),agent/'replacement_worker.py')
+            self.assertIsNone(result['lease'])
+
     def test_dead_worker_becomes_interrupted_and_orphan_blocks_resume(self):
         with tempfile.TemporaryDirectory() as tmp:
             service=self.module.Replacement(tmp,None);name='r000000000001'

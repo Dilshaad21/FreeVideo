@@ -77,6 +77,8 @@ class Replacement:
     def launch(self,folder):
         import os,psutil
         env=dict(os.environ)
+        # The server imports source dynamically; child interpreters need an explicit path.
+        env['PYTHONPATH']=str(Path(__file__).resolve().parents[2])
         for key in list(env):
             if key.startswith(('FREEVIDEO_RUNTIME_LOCK_','FREEVIDEO_BOOTSTRAP_')):env.pop(key,None)
         try:
