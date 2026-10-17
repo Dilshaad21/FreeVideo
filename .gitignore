@@ -64,3 +64,15 @@ engine-gpu-*.lock
 /optional/
 *.gguf
 /out/
+
+# Agent credentials, private media, run state and machine-specific configuration.
+/agent/**/state/
+/agent/**/config.json
+/agent/**/backend.json
+/agent/token
+/agent/training/
+/agent/replacement/
+**/__pycache__/
+# Reviewed source-only trainer bundle, including its upstream notices.
+!/agent/lora-pipeline/vendor/
+!/agent/lora-pipeline/vendor/fizgig-eb7492cd.tar.gz

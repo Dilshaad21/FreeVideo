@@ -1,0 +1,12 @@
+{
+  "python": "C:/Users/WINDOWS_USER/FreeVideo/FreeVideo-engine/agent/training/env/Scripts/python.exe",
+  "repo": "C:/Users/WINDOWS_USER/FreeVideo/FreeVideo-engine/agent/training/Fizgig",
+  "trainer_commit": "eb7492cd582bcb6de0094aa7b89c65c2ea5b4024",
+  "text_encoder": "C:/Users/WINDOWS_USER/FreeVideo/FreeVideo-engine/models/encoder/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+  "lora_dir": "C:/Users/WINDOWS_USER/FreeVideo/ComfyUI/models/loras/trained",
+  "dit": "C:/Users/WINDOWS_USER/FreeVideo/FreeVideo-engine/agent/training/models/dit/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+  "vae": "C:/Users/WINDOWS_USER/FreeVideo/FreeVideo-engine/agent/training/models/vae/vae/minimax_h3_video_vae_fp16.safetensors",
+  "training_adapter": "C:/Users/WINDOWS_USER/FreeVideo/FreeVideo-engine/agent/training/models/training_adapter/minimax_h3_image_training_adapter.safetensors",
+  "text_disk_streaming": true,
+  "text_streaming": false
+}

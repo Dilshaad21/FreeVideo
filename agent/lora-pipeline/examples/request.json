@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "subject": "person to train",
+  "photos": "./person-photos.zip",
+  "profile": "h3-person",
+  "trigger": "personcue",
+  "video": {
+    "prompt": "The person smiles and turns toward the camera in a sunlit garden.",
+    "seconds": 5,
+    "strength": 1.0
+  }
+}

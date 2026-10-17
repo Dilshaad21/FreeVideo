@@ -1,0 +1,7 @@
+{
+  "host": "windows-user@windows-host",
+  "key": "~/.ssh/windows_pc_ed25519",
+  "token_file": "C:/Users/WINDOWS_USER/FreeVideo/FreeVideo-engine/agent/token",
+  "remote_root": "C:/Users/WINDOWS_USER/FreeVideo/FreeVideo-engine",
+  "transport": "ssh"
+}

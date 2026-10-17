@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "training_api": "1.1",
+  "profile": "h3-person-v1",
+  "trainer_commit": "eb7492cd582bcb6de0094aa7b89c65c2ea5b4024",
+  "profile_defaults": {
+    "epochs": 50,
+    "rank": 8,
+    "megapixels": 0.25
+  },
+  "sha256": {
+    "freevideo_lora.py": "c9d8a3a1dad97f3255b04ae77dfc26aecc6289870660f83d99e83db2cb991460",
+    "driver.py": "864e91ef684f0013214f98337f245c0155879d9f1b66a824f87d765603fd2384",
+    "install_windows.py": "18d4eef5fc630cf2156f80369ef778b2e19cc08f5acd42b0bd9e94d21dbe4075",
+    "extension/training.py": "32511999e4d3edad5f6e89f11b0da7cd4757a189a9efae2b01c4d9e866bb64e0",
+    "extension/training_worker.py": "edf94ffcef263f6ca9ecc37392764390171fc3c90a9d9d3590e7c51818e08fa9",
+    "extension/install_extension.py": "f320d2f09bffea9c37f53fcd596af19888055849135be9fa9dae09d1922462a4",
+    "vendor/fizgig-eb7492cd.tar.gz": "9f24df47d5c42277018a87121d409ec269816bdc39897002addb512df15dd87e"
+  }
+}

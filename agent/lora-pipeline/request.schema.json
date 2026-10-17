@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FreeVideo LoRA request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "subject",
+    "photos"
+  ],
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Request format version."
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short name or description for the person being trained.",
+      "maxLength": 80
+    },
+    "photos": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to a ZIP archive or directory containing captioned JPG, PNG, or WebP images."
+    },
+    "profile": {
+      "const": "h3-person",
+      "description": "Training profile; defaults to h3-person when omitted."
+    },
+    "trigger": {
+      "type": "string",
+      "minLength": 3,
+      "description": "Optional user-chosen trigger phrase.",
+      "maxLength": 40,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]{2,39}$"
+    },
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 1.625,
+          "maximum": 60
+        },
+        "strength": {
+          "type": "number",
+          "minimum": -4,
+          "maximum": 4
+        }
+      }
+    },
+    "epochs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional training override.",
+      "maximum": 500
+    },
+    "rank": {
+      "type": "integer",
+      "enum": [
+        4,
+        8,
+        16
+      ]
+    },
+    "megapixels": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 1
+    }
+  }
+}

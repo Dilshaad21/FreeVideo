@@ -407,7 +407,11 @@ def register():
 
     query_key = web.AppKey('agent_query', dict)
     body_key = web.AppKey('agent_body', dict)
+    from . import training
     contracts = contract.contracts()
+    contracts.update(training.contracts())
+    from . import replacement
+    contracts.update(replacement.contracts())
     page_sessions = {}
     connection = dict(connected=False, client=None, via=None, last_seen_at=None)
     # The conversation in the Autopilot view: the page and the connected agent talk in the agent's latest session.
@@ -1188,7 +1192,9 @@ def register():
     @routes.get(PREFIX)
     @guarded
     async def info(request):
-        return reply(await asyncio.to_thread(capabilities, port, jobs))
+        value = await asyncio.to_thread(capabilities, port, jobs)
+        value['training'] = dict(base=PREFIX + '/training', guide=PREFIX + '/training/guide')
+        return reply(value)
 
     @routes.get(PREFIX + '/capabilities')
     @guarded
@@ -1227,6 +1233,8 @@ def register():
     @routes.post(PREFIX + '/jobs')
     @guarded
     async def submit(request):
+        if any(r['status'] in ('waiting', 'running', 'cancelling') for r in server._freevideo_training.runs()):
+            return reply({'error': {'code': 'training_busy', 'message': 'A LoRA is training. Wait or cancel it before generating.'}}, 409)
         value = await body(request)
         client = request.headers.get('X-FreeVideo-Client', '')[:80] or None
         rows, replay = await asyncio.to_thread(jobs.submit_request, value, client=client,
@@ -1930,6 +1938,8 @@ def register():
         return web.FileResponse(path, headers={'Content-Type': kind, 'Cache-Control': 'private, no-store',
             'Content-Disposition': 'attachment', 'X-Content-Type-Options': 'nosniff'})
 
+    server._freevideo_training = training.register(routes, guarded, reply, body, port, jobs)
+    server._freevideo_replacement = replacement.register(routes, guarded, reply, body, port, jobs)
     server._freevideo_agent_registered = True
     if startup_failed:
         # Keep the guarded 503 routes, but publish no partial stores, token or scheduler.

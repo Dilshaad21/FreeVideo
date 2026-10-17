@@ -1,0 +1,24 @@
+name: Agent pipeline tests
+on:
+  push:
+    paths: ['agent/**', 'freevideo_engine/agent/**', '.github/workflows/agent-pipelines.yml']
+  pull_request:
+    paths: ['agent/**', 'freevideo_engine/agent/**', '.github/workflows/agent-pipelines.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy pillow av imageio-ffmpeg psutil
+      - run: python -m unittest discover -s agent/lora-pipeline/tests -v
+      - run: python -m unittest discover -s agent/lora-pipeline/extension -p test_training.py -v
+      - run: python -m unittest discover -s agent/replacement-pipeline/tests -v

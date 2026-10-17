@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "generation": "Wan2.2-Animate-14B via WanGP",
+  "wangp": {
+    "repository": "https://github.com/deepbeepmeep/WanGP",
+    "commit": "fde3c7e10c47c854913d5877d955901a35e44714"
+  },
+  "sam2": {
+    "repository": "https://github.com/facebookresearch/sam2",
+    "checkpoint": "sam2.1_hiera_tiny.pt",
+    "commit": "2b90b9f5ceec907a1c18123530e92e794ad901a4"
+  },
+  "h3_identity_lora_compatible": false,
+  "preservation": "Decoded RGB identical outside saved edit region in lossless FFV1 master; MP4 is a lossy preview"
+}

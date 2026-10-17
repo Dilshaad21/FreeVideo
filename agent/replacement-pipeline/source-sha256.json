@@ -1,0 +1,14 @@
+{
+  "composite.py": "a3104807fb58fb385ad29d55773aeeb801dd524ad0dc023ee2e9555a4b9d3714",
+  "finish_setup.py": "718b77a93814c84581740a5a048aac21e6193268e31539cd91083ebc280a2d21",
+  "freevideo_replace.py": "e7d1154ad05d4792538334e87266284e1fa49a26eb8f176ce0771f6cadb94cd4",
+  "install_extension.py": "9d2c38091b693df24f19e1ac04c3388a7b51be3bf65691f291b6b46ffe9da6bd",
+  "prefetch.py": "3605dadf206b49776142c603f555afab268f2fdac54f05d09e2c4b2e36fd43b9",
+  "replacement.py": "7ac96d04330d48afdea949955a243323f5b76791192de2d11bf18629f638bf05",
+  "replacement_support.py": "62ea6f60640a792b2b4db95f5c28fb0029b4437c176a7707c37e9701222cb306",
+  "replacement_worker.py": "7b0fce07f0600b73c1b14d6005b70af3b3e186992927c46a53f243ae31bfa427",
+  "runtime.py": "a1359f97fb1a1e5f8b8769ce8626ad9ae6029b09b45c2bfc5772024faea27cda",
+  "setup_windows.py": "9294b26b2a8998debf32e0a45c04940b5954aa9bad8915367733bb4d33d0d7da",
+  "tests/test_hardening.py": "58c3c791a456c84b57f47bacfb9c77556d3b383d29faf92a4565b665585cab1b",
+  "tests/test_replacement.py": "2cb9efe10c46568e2f640ff5f3ac72d2a7b92255a89a3d77ba447871fedd832c"
+}

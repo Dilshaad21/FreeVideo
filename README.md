@@ -142,3 +142,8 @@ the [H3 text encoder for ComfyUI](https://huggingface.co/t8star/Vdn-Minimax-H3-C
 ## License
 
 The code is released under the [Apache License 2.0](LICENSE). The model weights are licensed under the [MiniMax H3 Community License](https://huggingface.co/OpenVDN/vdn-minimax-h3-edge/blob/main/LICENSE), which includes territorial and acceptable-use restrictions.
+
+## Windows agent training and replacement (fork)
+
+This fork includes reusable LoRA training and experimental character replacement.
+See [the agent pipeline guide](docs/agent-pipelines.md) for setup, skills, limits and validation.

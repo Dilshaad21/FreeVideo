@@ -1,0 +1,7 @@
+{
+  "ref": "replacement-poc-001",
+  "source_path": "/absolute/path/to/short-source.mp4",
+  "character_path": "/absolute/path/to/replacement-character.png",
+  "box": [0.2, 0.05, 0.8, 0.98],
+  "prompt": "The replacement person follows the original action, with natural proportions and scene-matched lighting."
+}
