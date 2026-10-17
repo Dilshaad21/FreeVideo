@@ -170,6 +170,23 @@ class Response(io.BytesIO):
 
 
 class RuntimeDispatchTests(unittest.TestCase):
+    def test_session_disables_optional_pinned_ram_ring(self):
+        import runtime
+        from types import SimpleNamespace,ModuleType
+        engine=SimpleNamespace(server_config={},transformer_dtype_policy=None)
+        api=SimpleNamespace(_ensure_runtime=lambda:SimpleNamespace(module=engine))
+        shared=ModuleType('shared');shared_api=ModuleType('shared.api')
+        shared_api.init=lambda **kwargs:api
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp)/'WanGP').mkdir()
+            previous=os.getcwd();previous_path=list(sys.path)
+            try:
+                with patch.dict(sys.modules,{'shared':shared,'shared.api':shared_api}):
+                    self.assertIs(runtime.session(tmp),api)
+                self.assertIs(engine.server_config['smart_memory_pinning'],False)
+            finally:
+                os.chdir(previous);sys.path[:]=previous_path
+
     def test_padding_masks_trimmed_to_exact_source_length(self):
         import runtime
         with tempfile.TemporaryDirectory() as tmp:

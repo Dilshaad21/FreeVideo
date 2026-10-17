@@ -84,7 +84,7 @@ class Replacement:
         try:
             with (folder/'worker.log').open('ab') as log:
                 child=subprocess.Popen([sys.executable,'-m','freevideo_engine.agent.replacement_worker',
-                    '--root',str(self.root),'--job',folder.name],env=env,stdout=log,stderr=subprocess.STDOUT)
+                    '--root',str(self.root),'--job',folder.name],env=env,cwd=str(Path(__file__).resolve().parents[2]),stdout=log,stderr=subprocess.STDOUT)
             try:created=psutil.Process(child.pid).create_time()
             except psutil.NoSuchProcess:created=None
             return mutate(folder/'job.json',lambda row:row.update(launch_pid=child.pid,launch_created=created))

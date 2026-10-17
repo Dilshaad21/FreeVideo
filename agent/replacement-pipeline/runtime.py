@@ -102,7 +102,10 @@ def session(home):
     api=init(root=home/'WanGP',output_dir=home/'generated',
              cli_args=['--attention','sdpa','--profile','5'],console_output=True)
     runtime=api._ensure_runtime().module
-    runtime.server_config.update(keep_intermediate_sliding_windows=0,enhancer_enabled=0)
+    # The optional pinned staging ring consumes ~3.6 GB with Animate's CLIP.
+    # Stream unpinned blocks instead on the supported 16 GB Windows machine.
+    runtime.server_config.update(keep_intermediate_sliding_windows=0,enhancer_enabled=0,
+                                 smart_memory_pinning=False)
     runtime.transformer_dtype_policy='bf16'
     return api
 
@@ -133,7 +136,7 @@ def track(config,frames,destination,box):
 def generate(config,request):
     api=session(config['home'])
     settings=api.get_default_settings('animate')
-    settings.update(model_type='animate',prompt=request['prompt'],negative_prompt='distorted face, flickering, extra limbs',
+    settings.update(model_type='animate',override_profile=5,prompt=request['prompt'],negative_prompt='distorted face, flickering, extra limbs',
         resolution=request['resolution'],num_inference_steps=config.get('steps',20),
         video_length=request['frames'],force_fps='control',seed=42,
         video_prompt_type='PVBAIH#1',image_prompt_type='',
