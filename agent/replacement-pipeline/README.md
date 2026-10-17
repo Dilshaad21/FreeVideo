@@ -92,6 +92,16 @@ of host RAM for faster transfers. This trades transfer speed for available RAM;
 the video settings and resource guards stay unchanged. Actual
 8 GB VRAM / 16 GB RAM suitability still needs a real input benchmark.
 
+On Windows, an optional backend setting `windows_working_set_mib` caps only the
+generation child's resident RAM through `SetProcessWorkingSetSizeEx`. The default
+is disabled (0). A value such as 6144 allows Windows to page model weights more
+aggressively while leaving system headroom. This can be much slower and does not
+cap virtual memory or guarantee model fit. The child verifies the hard limit,
+and existing RAM/temperature guards remain active. Changing this setting changes
+the execution signature and requires a new deliberate request reference.
+Microsoft API: https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-setprocessworkingsetsizeex
+
+
 Dependencies retain their upstream licenses: WanGP Community License, Wan
 model license and SAM 2 Apache 2.0. See `provenance.json` for pinned sources.
 

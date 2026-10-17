@@ -133,7 +133,36 @@ def track(config,frames,destination,box):
         if count!=state['num_frames']:raise RuntimeError('Tracker did not cover all frames')
 
 
+def limit_windows_working_set(mib):
+    """Bound this child process's resident RAM, allowing Windows to page weights."""
+    if not mib:return None
+    if isinstance(mib,bool) or not isinstance(mib,int) or not 1024<=mib<=32768:
+        raise ValueError('windows_working_set_mib must be an integer from 1024 to 32768')
+    if os.name!='nt':raise RuntimeError('Windows working-set cap requires Windows')
+    import ctypes
+    from ctypes import wintypes
+    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    kernel.GetCurrentProcess.restype=wintypes.HANDLE
+    kernel.SetProcessWorkingSetSizeEx.argtypes=[wintypes.HANDLE,ctypes.c_size_t,ctypes.c_size_t,wintypes.DWORD]
+    kernel.SetProcessWorkingSetSizeEx.restype=wintypes.BOOL
+    kernel.GetProcessWorkingSetSizeEx.argtypes=[wintypes.HANDLE,ctypes.POINTER(ctypes.c_size_t),ctypes.POINTER(ctypes.c_size_t),ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetProcessWorkingSetSizeEx.restype=wintypes.BOOL
+    handle=kernel.GetCurrentProcess();maximum=mib*1024**2
+    # HARDWS_MIN_DISABLE | HARDWS_MAX_ENABLE; change only this generation child.
+    if not kernel.SetProcessWorkingSetSizeEx(handle,80*1024,maximum,6):
+        raise ctypes.WinError(ctypes.get_last_error())
+    minimum=ctypes.c_size_t();actual=ctypes.c_size_t();flags=wintypes.DWORD()
+    if not kernel.GetProcessWorkingSetSizeEx(handle,ctypes.byref(minimum),ctypes.byref(actual),ctypes.byref(flags)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not flags.value&4 or actual.value>maximum:
+        raise RuntimeError('Windows did not enforce the requested working-set cap')
+    result=dict(windows_working_set_mib=mib,maximum_bytes=actual.value,flags=flags.value)
+    print(json.dumps(result),flush=True)
+    return result
+
+
 def generate(config,request):
+    limit_windows_working_set(config.get('windows_working_set_mib',0))
     api=session(config['home'])
     settings=api.get_default_settings('animate')
     settings.update(model_type='animate',override_profile=5,prompt=request['prompt'],negative_prompt='distorted face, flickering, extra limbs',

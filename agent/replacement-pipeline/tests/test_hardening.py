@@ -170,6 +170,20 @@ class Response(io.BytesIO):
 
 
 class RuntimeDispatchTests(unittest.TestCase):
+    def test_working_set_cap_is_opt_in_and_validated(self):
+        import runtime
+        self.assertIsNone(runtime.limit_windows_working_set(0))
+        for value in (True,128,1024.5,'6144',65536):
+            with self.assertRaises(ValueError):runtime.limit_windows_working_set(value)
+
+    @unittest.skipUnless(os.name=='nt','Windows working-set API integration')
+    def test_working_set_cap_is_enforced_in_separate_process(self):
+        import runtime
+        child=subprocess.run([sys.executable,'-c',
+            'import runtime;result=runtime.limit_windows_working_set(1024);assert result["flags"]&4;assert result["maximum_bytes"]<=1024**3'],
+            cwd=Path(runtime.__file__).parent,capture_output=True,text=True,timeout=20)
+        self.assertEqual(child.returncode,0,child.stderr)
+
     def test_session_disables_optional_pinned_ram_ring(self):
         import runtime
         from types import SimpleNamespace,ModuleType
