@@ -143,8 +143,11 @@ class DriverTests(unittest.TestCase):
     def test_start_driver_reuses_recent_live_heartbeat(self):
         meta_path = self.state / "run-1234.driver.json"
         meta_path.write_text(json.dumps({"pid": os.getpid(), "status": "running", "heartbeat": __import__("time").time()}))
-        result = driver.start_driver("/tmp/config.json", "run-1234", state_dir=self.state,
-                                     platform="posix", popen=lambda *a, **k: self.fail("spawned duplicate"))
+        # Exercise heartbeat reuse without sending a POSIX signal on Windows.
+        with mock.patch.object(driver, "_pid_alive", return_value=True) as alive:
+            result = driver.start_driver("/tmp/config.json", "run-1234", state_dir=self.state,
+                                         platform="posix", popen=lambda *a, **k: self.fail("spawned duplicate"))
+        alive.assert_called_once_with(os.getpid(), "posix")
         self.assertEqual({"status": "already_running", "pid": os.getpid()}, result)
 
     def test_start_driver_detaches_posix_process_with_absolute_config(self):
